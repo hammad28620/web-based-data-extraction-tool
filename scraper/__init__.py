@@ -1,0 +1,3 @@
+"""
+Scraper module initialization
+"""
