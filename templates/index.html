@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block title %}Home - Web Data Extractor{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<section class="hero">
+    <div class="hero-content">
+        <h2>Extract Web Data Effortlessly</h2>
+        <p>Enter a URL and CSS selector to extract and download structured data in seconds</p>
+    </div>
+</section>
+
+<!-- Main Form Section -->
+<section class="scraper-section">
+    <div class="form-container">
+        <h3>Data Extraction Form</h3>
+        
+        <!-- Alert Messages -->
+        <div id="alertContainer" class="alert-container"></div>
+
+        <!-- Scraper Form -->
+        <form id="scraperForm" class="scraper-form">
+            <!-- URL Input -->
+            <div class="form-group">
+                <label for="urlInput" class="form-label">
+                    Website URL <span class="required">*</span>
+                </label>
+                <input 
+                    type="url"
+                    id="urlInput"
+                    name="url"
+                    class="form-control"
+                    placeholder="https://example.com"
+                    required
+                    autocomplete="url"
+                >
+                <div class="form-hint">Enter the complete URL starting with http:// or https://</div>
+            </div>
+
+            <!-- Selector Input -->
+            <div class="form-group">
+                <label for="selectorInput" class="form-label">
+                    CSS Selector or HTML Tag <span class="required">*</span>
+                </label>
+                <input 
+                    type="text"
+                    id="selectorInput"
+                    name="selector"
+                    class="form-control"
+                    placeholder="div.product or table or a.link"
+                    required
+                    autocomplete="off"
+                >
+                <div class="form-hint">Use CSS selector (e.g., .classname, #id, div.class) or HTML tag (e.g., a, p, div)</div>
+            </div>
+
+            <!-- Pages Input (Optional) -->
+            <div class="form-group">
+                <label for="pagesInput" class="form-label">
+                    Number of Pages <span class="optional">(Optional)</span>
+                </label>
+                <input 
+                    type="number"
+                    id="pagesInput"
+                    name="pages"
+                    class="form-control"
+                    placeholder="1"
+                    min="1"
+                    max="100"
+                    value="1"
+                    autocomplete="off"
+                >
+                <div class="form-hint">Maximum pages to scrape (default: 1)</div>
+            </div>
+
+            <!-- Submit Button -->
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="scraperSubmitBtn">
+                    <span class="btn-text">Extract Data</span>
+                    <span class="btn-loader" id="btnLoader" style="display: none;">
+                        <span class="loader"></span>
+                    </span>
+                </button>
+                <button type="reset" class="btn btn-secondary" id="scraperResetBtn">
+                    Clear Form
+                </button>
+            </div>
+        </form>
+    </div>
+</section>
+
+<!-- Results Section -->
+<section class="results-section" id="resultsSection" style="display: none;">
+    <div class="results-header">
+        <h3>Extracted Data</h3>
+        <div class="results-actions">
+            <button id="downloadCsvBtn" class="btn btn-success" style="display: none;">
+                📥 Download CSV
+            </button>
+            <button id="clearResultsBtn" class="btn btn-secondary">
+                Clear Results
+            </button>
+        </div>
+    </div>
+
+    <!-- Results Info -->
+    <div class="results-info">
+        <p>Found <span id="resultCount" class="highlight">0</span> items</p>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingIndicator" class="loading-indicator" style="display: none;">
+        <div class="spinner"></div>
+        <p>Scraping data...</p>
+    </div>
+
+    <!-- Results Table -->
+    <div id="resultsTableContainer" class="table-responsive" style="display: none;">
+        <table id="resultsTable" class="results-table">
+            <thead id="tableHead">
+                <tr></tr>
+            </thead>
+            <tbody id="tableBody">
+            </tbody>
+        </table>
+    </div>
+
+    <!-- No Results Message -->
+    <div id="noResultsMessage" class="no-results" style="display: none;">
+        <p>No data was extracted. Try a different selector or URL.</p>
+    </div>
+</section>
+
+<!-- Information Section -->
+<section class="info-section" id="guide">
+    <h3>How to Use</h3>
+    <div class="info-grid">
+        <div class="info-card">
+            <h4>1. Enter Website URL</h4>
+            <p>Paste the URL of the website you want to extract data from. The URL must be accessible and start with http:// or https://</p>
+        </div>
+        <div class="info-card">
+            <h4>2. Provide CSS Selector</h4>
+            <p>Use a CSS selector or HTML tag to target the elements you want to extract. For example: <code>.product</code>, <code>tr</code>, or <code>#item-list li</code></p>
+        </div>
+        <div class="info-card">
+            <h4>3. Specify Number of Pages</h4>
+            <p>Enter the number of pages to scrape (optional). Leave as 1 to extract from a single page, or increase for multi-page scraping.</p>
+        </div>
+        <div class="info-card">
+            <h4>4. Extract & Download</h4>
+            <p>Click "Extract Data" to start scraping. Once complete, review the results and download as CSV for further analysis.</p>
+        </div>
+    </div>
+</section>
+
+<!-- About Section -->
+<section class="about-section" id="about">
+    <h3>About This Tool</h3>
+    <div class="about-content">
+        <p>
+            The Web Data Extractor is a powerful tool for extracting structured data from websites. 
+            It allows you to easily specify CSS selectors to target specific HTML elements and download 
+            the extracted data in CSV format for analysis and processing.
+        </p>
+        <p>
+            Whether you need to collect product listings, article headlines, or any other web data, 
+            this tool provides a simple and intuitive interface to get the job done.
+        </p>
+        <h4>Features:</h4>
+        <ul>
+            <li>Easy-to-use web interface</li>
+            <li>CSS selector-based data extraction</li>
+            <li>Multi-page scraping support</li>
+            <li>CSV export functionality</li>
+            <li>Real-time data display</li>
+            <li>Comprehensive error messages</li>
+        </ul>
+    </div>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Form handling will be implemented in main.js
+    document.addEventListener('DOMContentLoaded', function() {
+        initializeApp();
+    });
+</script>
+{% endblock %}

@@ -21,7 +21,7 @@ class Config:
     JSON_SORT_KEYS = False
     
     # Request settings
-    REQUEST_TIMEOUT = 10  # seconds
+    REQUEST_TIMEOUT = 30  # seconds (increased from 10 for slow websites)
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB max file size
     
     # Scraping settings
