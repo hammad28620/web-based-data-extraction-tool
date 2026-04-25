@@ -7,14 +7,26 @@
 <section class="hero">
     <div class="hero-content">
         <h2>Extract Web Data Effortlessly</h2>
-        <p>Enter a URL and CSS selector to extract and download structured data in seconds</p>
+        <p>Extract website data or scrape social media profiles in seconds</p>
     </div>
 </section>
 
-<!-- Main Form Section -->
-<section class="scraper-section">
+<!-- Tab Navigation -->
+<section class="tabs-section">
+    <div class="tabs-container">
+        <button class="tab-btn active" data-tab="website-scraper">
+            🌐 Website Scraper
+        </button>
+        <button class="tab-btn" data-tab="social-scraper">
+            📱 Social Media Scraper
+        </button>
+    </div>
+</section>
+
+<!-- Website Scraper Tab -->
+<section class="scraper-section" id="website-scraper" style="display: block;">
     <div class="form-container">
-        <h3>Data Extraction Form</h3>
+        <h3>Website Data Extraction</h3>
         
         <!-- Alert Messages -->
         <div id="alertContainer" class="alert-container"></div>
@@ -38,22 +50,7 @@
                 <div class="form-hint">Enter the complete URL starting with http:// or https://</div>
             </div>
 
-            <!-- Selector Input -->
-            <div class="form-group">
-                <label for="selectorInput" class="form-label">
-                    CSS Selector or HTML Tag <span class="required">*</span>
-                </label>
-                <input 
-                    type="text"
-                    id="selectorInput"
-                    name="selector"
-                    class="form-control"
-                    placeholder="div.product or table or a.link"
-                    required
-                    autocomplete="off"
-                >
-                <div class="form-hint">Use CSS selector (e.g., .classname, #id, div.class) or HTML tag (e.g., a, p, div)</div>
-            </div>
+
 
             <!-- Pages Input (Optional) -->
             <div class="form-group">
@@ -132,25 +129,240 @@
     </div>
 </section>
 
+<!-- Results Section -->
+<section class="results-section" id="resultsSection" style="display: none;">
+    <div class="results-header">
+        <h3>Extracted Data</h3>
+        <div class="results-actions">
+            <button id="downloadCsvBtn" class="btn btn-success" style="display: none;">
+                📥 Download CSV
+            </button>
+            <button id="clearResultsBtn" class="btn btn-secondary">
+                Clear Results
+            </button>
+        </div>
+    </div>
+
+    <!-- Results Info -->
+    <div class="results-info">
+        <p>Found <span id="resultCount" class="highlight">0</span> items</p>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingIndicator" class="loading-indicator" style="display: none;">
+        <div class="spinner"></div>
+        <p>Scraping data...</p>
+    </div>
+
+    <!-- Results Table -->
+    <div id="resultsTableContainer" class="table-responsive" style="display: none;">
+        <table id="resultsTable" class="results-table">
+            <thead id="tableHead">
+                <tr></tr>
+            </thead>
+            <tbody id="tableBody">
+            </tbody>
+        </table>
+    </div>
+
+    <!-- No Results Message -->
+    <div id="noResultsMessage" class="no-results" style="display: none;">
+        <p>No data was extracted. Try a different selector or URL.</p>
+    </div>
+</section>
+
+<!-- Social Media Scraper Tab -->
+<section class="scraper-section" id="social-scraper" style="display: none;">
+    <div class="form-container">
+        <h3>Social Media Profile Scraper</h3>
+        
+        <!-- Alert Messages -->
+        <div id="socialAlertContainer" class="alert-container"></div>
+
+        <!-- Tab Selection -->
+        <div class="social-tabs">
+            <button class="social-tab-btn active" data-social-tab="profile">
+                👤 Profile
+            </button>
+            <button class="social-tab-btn" data-social-tab="posts">
+                📝 Posts
+            </button>
+        </div>
+
+        <!-- Profile Tab -->
+        <form id="socialProfileForm" class="scraper-form" style="display: block;">
+            <div class="form-group">
+                <label for="platformSelect" class="form-label">
+                    Platform <span class="required">*</span>
+                </label>
+                <select id="platformSelect" class="form-control" required>
+                    <option value="">Select a platform...</option>
+                    <option value="twitter">Twitter/X</option>
+                    <option value="instagram">Instagram</option>
+                    <option value="linkedin">LinkedIn</option>
+                    <option value="tiktok">TikTok</option>
+                    <option value="youtube">YouTube</option>
+                </select>
+                <div class="form-hint">Choose the social media platform</div>
+            </div>
+
+            <div class="form-group">
+                <label for="usernameInput" class="form-label">
+                    Username <span class="required">*</span>
+                </label>
+                <input 
+                    type="text"
+                    id="usernameInput"
+                    class="form-control"
+                    placeholder="e.g., nasa, cristiano, etc."
+                    required
+                >
+                <div class="form-hint">Enter the username or profile handle</div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="profileSubmitBtn">
+                    <span class="btn-text">Scrape Profile</span>
+                    <span class="btn-loader" style="display: none;">
+                        <span class="loader"></span>
+                    </span>
+                </button>
+                <button type="reset" class="btn btn-secondary">
+                    Clear Form
+                </button>
+            </div>
+        </form>
+
+        <!-- Posts Tab -->
+        <form id="socialPostsForm" class="scraper-form" style="display: none;">
+            <div class="form-group">
+                <label for="postsPlatformSelect" class="form-label">
+                    Platform <span class="required">*</span>
+                </label>
+                <select id="postsPlatformSelect" class="form-control" required>
+                    <option value="">Select a platform...</option>
+                    <option value="twitter">Twitter/X</option>
+                    <option value="instagram">Instagram</option>
+                    <option value="linkedin">LinkedIn</option>
+                    <option value="tiktok">TikTok</option>
+                    <option value="youtube">YouTube</option>
+                </select>
+                <div class="form-hint">Choose the social media platform</div>
+            </div>
+
+            <div class="form-group">
+                <label for="postsUsernameInput" class="form-label">
+                    Username <span class="required">*</span>
+                </label>
+                <input 
+                    type="text"
+                    id="postsUsernameInput"
+                    class="form-control"
+                    placeholder="e.g., nasa, cristiano, etc."
+                    required
+                >
+                <div class="form-hint">Enter the username or profile handle</div>
+            </div>
+
+            <div class="form-group">
+                <label for="postsLimitInput" class="form-label">
+                    Number of Posts <span class="optional">(Optional)</span>
+                </label>
+                <input 
+                    type="number"
+                    id="postsLimitInput"
+                    class="form-control"
+                    placeholder="10"
+                    min="1"
+                    max="100"
+                    value="10"
+                >
+                <div class="form-hint">Maximum number of posts to scrape (default: 10)</div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="postsSubmitBtn">
+                    <span class="btn-text">Scrape Posts</span>
+                    <span class="btn-loader" style="display: none;">
+                        <span class="loader"></span>
+                    </span>
+                </button>
+                <button type="reset" class="btn btn-secondary">
+                    Clear Form
+                </button>
+            </div>
+        </form>
+    </div>
+</section>
+
+<!-- Social Media Results Section -->
+<section class="results-section" id="socialResultsSection" style="display: none;">
+    <div class="results-header">
+        <h3>Profile Data</h3>
+        <div class="results-actions">
+            <button id="copySocialDataBtn" class="btn btn-success" style="display: none;">
+                📋 Copy Data
+            </button>
+            <button id="clearSocialResultsBtn" class="btn btn-secondary">
+                Clear Results
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="socialLoadingIndicator" class="loading-indicator" style="display: none;">
+        <div class="spinner"></div>
+        <p>Fetching social media data...</p>
+    </div>
+
+    <!-- Profile Results -->
+    <div id="socialProfileResultsContainer" style="display: none;">
+        <div class="profile-card">
+            <div class="profile-header">
+                <h4 id="profileUsername"></h4>
+                <span id="profilePlatform" class="badge"></span>
+            </div>
+            <div class="profile-info" id="profileInfoContainer">
+                <!-- Profile data will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Posts Results -->
+    <div id="socialPostsResultsContainer" style="display: none;">
+        <div class="results-info">
+            <p>Found <span id="socialResultCount" class="highlight">0</span> posts</p>
+        </div>
+        <div id="postsListContainer" class="posts-list">
+            <!-- Posts will be inserted here -->
+        </div>
+    </div>
+
+    <!-- Error Message -->
+    <div id="socialErrorMessage" class="error-message" style="display: none;">
+        <p id="errorText"></p>
+    </div>
+</section>
+
 <!-- Information Section -->
 <section class="info-section" id="guide">
     <h3>How to Use</h3>
     <div class="info-grid">
         <div class="info-card">
-            <h4>1. Enter Website URL</h4>
-            <p>Paste the URL of the website you want to extract data from. The URL must be accessible and start with http:// or https://</p>
+            <h4>🌐 Website Scraper</h4>
+            <p>Extract data from any website using CSS selectors. Specify the elements you want to extract and download as CSV.</p>
         </div>
         <div class="info-card">
-            <h4>2. Provide CSS Selector</h4>
-            <p>Use a CSS selector or HTML tag to target the elements you want to extract. For example: <code>.product</code>, <code>tr</code>, or <code>#item-list li</code></p>
+            <h4>📱 Social Media Scraper</h4>
+            <p>Scrape public profiles and posts from major social media platforms including Twitter, Instagram, LinkedIn, TikTok, and YouTube.</p>
         </div>
         <div class="info-card">
-            <h4>3. Specify Number of Pages</h4>
-            <p>Enter the number of pages to scrape (optional). Leave as 1 to extract from a single page, or increase for multi-page scraping.</p>
+            <h4>📥 Easy Export</h4>
+            <p>Download extracted data in CSV format for further analysis and processing in spreadsheet applications.</p>
         </div>
         <div class="info-card">
-            <h4>4. Extract & Download</h4>
-            <p>Click "Extract Data" to start scraping. Once complete, review the results and download as CSV for further analysis.</p>
+            <h4>⚡ Fast & Reliable</h4>
+            <p>Get results in seconds with our optimized scraping engine and built-in error handling.</p>
         </div>
     </div>
 </section>

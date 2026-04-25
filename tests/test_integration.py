@@ -60,12 +60,16 @@ class TestScrapeEndpoint:
         assert response.status_code == 400
     
     def test_scrape_missing_selector(self, client):
-        """Test scraping without selector"""
+        """Test scraping without selector - should scrape all content"""
         payload = {'url': 'https://example.com'}
         response = client.post('/scrape',
                               data=json.dumps(payload),
                               content_type='application/json')
-        assert response.status_code == 400
+        # Selector is now optional - should return 200 and extract all content
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data['success'] == True
+        assert 'data' in data
     
     def test_scrape_invalid_url(self, client):
         """Test scraping with invalid URL"""

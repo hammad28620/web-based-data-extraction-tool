@@ -17,7 +17,7 @@ from app import create_app
 @pytest.fixture
 def app():
     """Create Flask application for testing"""
-    app_instance = create_app('TestingConfig')
+    app_instance = create_app('testing')  # Use lowercase 'testing'
     return app_instance
 
 
@@ -85,3 +85,15 @@ def sample_data_list():
         'Item 2',  # Duplicate
         'Item 4'
     ]
+
+
+@pytest.fixture
+def celery_app():
+    """Create Celery app for testing"""
+    from celery_app import celery_app as app
+    app.conf.update(
+        CELERY_ALWAYS_EAGER=True,
+        CELERY_EAGER_PROPAGATES_EXCEPTIONS=True,
+    )
+    yield app
+

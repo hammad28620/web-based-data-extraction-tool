@@ -6,6 +6,7 @@ Validates user input for URLs, selectors, and other parameters
 import logging
 import re
 from urllib.parse import urlparse
+import ipaddress
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +16,77 @@ class ValidationError(Exception):
     pass
 
 
+def is_private_ip(hostname: str) -> bool:
+    """
+    Check if hostname/IP is private or reserved
+    
+    Args:
+        hostname (str): Hostname or IP address to check
+        
+    Returns:
+        bool: True if private/reserved, False otherwise
+    """
+    try:
+        # Check if it's an IP address
+        ip = ipaddress.ip_address(hostname)
+        
+        # Check if it's a private, loopback, or link-local address
+        return (
+            ip.is_private or 
+            ip.is_loopback or 
+            ip.is_link_local or 
+            ip.is_multicast or 
+            ip.is_reserved
+        )
+    except ValueError:
+        # Not an IP address, check if it looks like localhost-like hostname
+        hostname_lower = hostname.lower()
+        
+        private_patterns = [
+            'localhost',
+            '127.',
+            '192.168.',
+            '10.',
+            '172.16.',
+            '172.17.',
+            '172.18.',
+            '172.19.',
+            '172.20.',
+            '172.21.',
+            '172.22.',
+            '172.23.',
+            '172.24.',
+            '172.25.',
+            '172.26.',
+            '172.27.',
+            '172.28.',
+            '172.29.',
+            '172.30.',
+            '172.31.',
+            '0.0.0.0',
+            '169.254.',
+            '::1',  # IPv6 loopback
+            'fc00:',  # IPv6 private
+            'fe80:',  # IPv6 link-local
+            '.local',
+            '.internal',
+            '.private',
+            '.dev',
+            '.test',
+            '.example',
+        ]
+        
+        for pattern in private_patterns:
+            if hostname_lower.startswith(pattern) or pattern in hostname_lower:
+                return True
+        
+        return False
+
+
 def validate_url(url: str) -> bool:
     """
-    Validate if the URL is in correct format
+    Validate if the URL is in correct format and safe to fetch
+    Prevents SSRF attacks by blocking private/internal addresses
     
     Args:
         url (str): URL to validate
@@ -26,7 +95,7 @@ def validate_url(url: str) -> bool:
         bool: True if valid, False otherwise
         
     Raises:
-        ValidationError: If URL is invalid
+        ValidationError: If URL is invalid or potentially unsafe
     """
     if not url or not isinstance(url, str):
         raise ValidationError("URL must be a non-empty string")
@@ -40,6 +109,13 @@ def validate_url(url: str) -> bool:
     if not url.startswith(('http://', 'https://')):
         raise ValidationError("URL must start with http:// or https://")
     
+    # Check for HTML/JavaScript injection in URL
+    suspicious_patterns = ['<script', 'javascript:', 'onerror=', 'onload=']
+    url_lower = url.lower()
+    for pattern in suspicious_patterns:
+        if pattern in url_lower:
+            raise ValidationError(f"Suspicious pattern detected in URL: {pattern}")
+    
     # Parse URL
     try:
         result = urlparse(url)
@@ -49,12 +125,31 @@ def validate_url(url: str) -> bool:
             raise ValidationError("Invalid URL format")
         
         # Check domain name
-        if '.' not in result.netloc:
-            raise ValidationError("Invalid domain name")
+        if '.' not in result.netloc and not result.netloc.startswith('localhost'):
+            # Allow localhost without dot
+            if result.netloc != 'localhost' and ':' not in result.netloc:
+                raise ValidationError("Invalid domain name")
+        
+        # SSRF Protection: Check for private/internal addresses
+        # Extract hostname from netloc (remove port if present)
+        hostname = result.netloc.split(':')[0]
+        
+        if is_private_ip(hostname):
+            raise ValidationError("Access to private/internal addresses is not allowed")
+        
+        # Block file:// protocol
+        if result.scheme == 'file':
+            raise ValidationError("file:// protocol is not allowed")
+        
+        # Block data: protocol
+        if result.scheme == 'data':
+            raise ValidationError("data: protocol is not allowed")
         
         logger.info(f"URL validated successfully: {url}")
         return True
     
+    except ValidationError:
+        raise
     except Exception as e:
         logger.error(f"URL validation failed: {str(e)}")
         raise ValidationError(f"Invalid URL format: {str(e)}")
@@ -87,6 +182,18 @@ def validate_selector(selector: str) -> bool:
     # Check for very suspicious patterns
     if '<script' in selector.lower() or 'javascript:' in selector.lower():
         raise ValidationError("Invalid selector pattern detected")
+    
+    # Check for event handlers to prevent XSS
+    event_handlers = [
+        'onload', 'onerror', 'onmouseover', 'onmouseout', 'onclick', 'ondblclick',
+        'onkeydown', 'onkeyup', 'onkeypress', 'onfocus', 'onblur', 'onchange',
+        'onsubmit', 'onreset', 'onabort', 'ondrag', 'ondrop', 'onpaste', 'oncopy',
+        'oncut', 'onwheel', 'onscroll', 'onresize'
+    ]
+    selector_lower = selector.lower()
+    for handler in event_handlers:
+        if f'{handler}=' in selector_lower or f'{handler} ' in selector_lower:
+            raise ValidationError(f"Invalid event handler detected: {handler}")
     
     # Allow common selectors
     # Valid patterns: tag names, class names (.class), IDs (#id), CSS selectors
@@ -141,7 +248,7 @@ def validate_scrape_request(data: dict) -> dict:
     Validate complete scrape request
     
     Args:
-        data (dict): Request data containing url and selector
+        data (dict): Request data containing url and optional selector
         
     Returns:
         dict: Validated and cleaned data
@@ -162,15 +269,13 @@ def validate_scrape_request(data: dict) -> dict:
     except ValidationError as e:
         raise ValidationError(f"URL validation failed: {str(e)}")
     
-    # Extract and validate selector
+    # Extract and validate selector (now optional)
     selector = data.get('selector', '').strip()
-    if not selector:
-        raise ValidationError("Selector is required")
-    
-    try:
-        validate_selector(selector)
-    except ValidationError as e:
-        raise ValidationError(f"Selector validation failed: {str(e)}")
+    if selector:  # Only validate if provided
+        try:
+            validate_selector(selector)
+        except ValidationError as e:
+            raise ValidationError(f"Selector validation failed: {str(e)}")
     
     # Validate pages (optional)
     pages = data.get('pages', 1)
@@ -185,7 +290,7 @@ def validate_scrape_request(data: dict) -> dict:
     # Return cleaned data
     return {
         'url': url,
-        'selector': selector,
+        'selector': selector if selector else None,  # None if not provided
         'pages': max(1, int(pages)) if pages else 1,
         'include_attributes': data.get('include_attributes', False)
     }

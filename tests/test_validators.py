@@ -176,10 +176,11 @@ class TestScrapeRequestValidation:
             validate_scrape_request(request_data)
     
     def test_request_missing_selector(self):
-        """Test request missing selector"""
+        """Test request missing selector - selector is now optional"""
         request_data = {"url": "https://example.com"}
-        with pytest.raises(ValidationError):
-            validate_scrape_request(request_data)
+        result = validate_scrape_request(request_data)
+        assert result['url'] == "https://example.com"
+        assert result['selector'] is None  # Selector should be None when not provided
     
     def test_request_invalid_url(self):
         """Test request with invalid URL"""

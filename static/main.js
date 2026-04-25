@@ -59,11 +59,10 @@ async function handleFormSubmit(event) {
     
     // Get form values
     const urlInput = document.getElementById('urlInput').value.trim();
-    const selectorInput = document.getElementById('selectorInput').value.trim();
     const pagesInput = parseInt(document.getElementById('pagesInput').value) || 1;
     
     // Validate inputs
-    if (!validateInputs(urlInput, selectorInput)) {
+    if (!validateInputs(urlInput)) {
         return;
     }
     
@@ -74,10 +73,9 @@ async function handleFormSubmit(event) {
     showLoadingIndicator();
     
     try {
-        // Prepare request data
+        // Prepare request data (selector is optional - will scrape all content)
         const requestData = {
             url: urlInput,
-            selector: selectorInput,
             pages: pagesInput
         };
         
@@ -120,10 +118,9 @@ async function handleFormSubmit(event) {
 /**
  * Validate form inputs
  * @param {string} url - Website URL
- * @param {string} selector - CSS selector
  * @returns {boolean} - Whether inputs are valid
  */
-function validateInputs(url, selector) {
+function validateInputs(url) {
     // Validate URL format
     if (!url) {
         showAlert('Please enter a website URL', 'warning');
@@ -140,12 +137,6 @@ function validateInputs(url, selector) {
     const urlRegex = /^https?:\/\/.+/;
     if (!urlRegex.test(url)) {
         showAlert('Invalid URL format', 'warning');
-        return false;
-    }
-    
-    // Validate selector
-    if (!selector) {
-        showAlert('Please enter a CSS selector or HTML tag', 'warning');
         return false;
     }
     

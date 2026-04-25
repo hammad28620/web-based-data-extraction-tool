@@ -46,6 +46,9 @@ htmlcov/
 *.tmp
 temp/
 
-#local files for development
-PHASES.md
+# Markdown files (keep README.md only)
+*.md
+!README.md
+
+# Other local files for development
 requirements.txt

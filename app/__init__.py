@@ -10,6 +10,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from functools import wraps
 from datetime import datetime
+from werkzeug.exceptions import UnsupportedMediaType
 import sys
 
 # Add scraper module to path
@@ -20,6 +21,8 @@ from scraper.validators import validate_scrape_request, ValidationError
 from scraper.data_processor import DataProcessor
 from scraper.csv_exporter import CSVExporter
 from scraper.pagination_handler import PaginationHandler, ProgressTracker
+from celery_app import celery_app
+from tasks import scrape_url, process_and_export, scrape_and_export
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +66,17 @@ def create_app(config_name=None):
     
     logger.info(f"Flask app initialized in {config.__name__} mode")
     logger.info("Rate limiting enabled - 200 requests/day, 50 requests/hour")
+    
+    # Configure Celery
+    celery_app.conf.update(app.config)
+    
+    class ContextTask(celery_app.Task):
+        def __call__(self, *args, **kwargs):
+            with app.app_context():
+                return self.run(*args, **kwargs)
+    
+    celery_app.Task = ContextTask
+    logger.info("Celery configured and integrated with Flask")
     
     # Register error handlers
     register_error_handlers(app)
@@ -139,6 +153,17 @@ def register_error_handlers(app):
             'timestamp': datetime.utcnow().isoformat()
         }), 404
     
+    @app.errorhandler(415)
+    def unsupported_media_type(error):
+        """Handle 415 Unsupported Media Type errors"""
+        logger.error(f"Unsupported Media Type: {str(error)}")
+        return jsonify({
+            'success': False,
+            'error': 'Unsupported Media Type',
+            'message': 'Content-Type must be application/json',
+            'timestamp': datetime.utcnow().isoformat()
+        }), 415
+    
     @app.errorhandler(500)
     def internal_error(error):
         """Handle 500 Internal Server errors"""
@@ -160,6 +185,35 @@ def register_error_handlers(app):
             'message': 'An unexpected error occurred',
             'timestamp': datetime.utcnow().isoformat()
         }), 500
+    
+    # Handle specific Werkzeug exceptions
+    @app.errorhandler(UnsupportedMediaType)
+    def handle_unsupported_media_type(error):
+        """Handle UnsupportedMediaType exceptions from Flask"""
+        logger.warning(f"Unsupported media type: {str(error)}")
+        return jsonify({
+            'success': False,
+            'error': 'Unsupported Media Type',
+            'message': 'Content-Type must be application/json',
+            'timestamp': datetime.utcnow().isoformat()
+        }), 415
+    
+    # Handle JSON decode errors
+    @app.before_request
+    def handle_json_errors():
+        """Handle malformed JSON gracefully"""
+        if request.method in ['POST', 'PUT', 'PATCH']:
+            if request.content_type and 'application/json' in request.content_type:
+                try:
+                    request.get_json(force=True)
+                except Exception as e:
+                    logger.warning(f"Malformed JSON received: {str(e)}")
+                    return jsonify({
+                        'success': False,
+                        'error': 'Invalid JSON',
+                        'message': 'Request body contains invalid JSON',
+                        'timestamp': datetime.utcnow().isoformat()
+                    }), 400
 
 
 def register_routes(app, limiter=None):
@@ -207,7 +261,7 @@ def register_routes(app, limiter=None):
         Expected JSON payload:
         {
             "url": "https://example.com",
-            "selector": "div.class-name or tag-name",
+            "selector": "div.class-name or tag-name" (optional - omit to scrape all content),
             "pages": 1 (optional),
             "include_attributes": false (optional)
         }
@@ -217,11 +271,17 @@ def register_routes(app, limiter=None):
         """
         logger.info("Scrape endpoint called")
         
+        # Handle UnsupportedMediaType first before getting JSON
+        if request.content_type and 'application/json' not in request.content_type:
+            logger.warning(f"Invalid content type: {request.content_type}")
+            # Let Flask raise UnsupportedMediaType which will be caught by error handler
+            request.get_json()  # This will raise UnsupportedMediaType
+        
         try:
             # Get JSON data from request
-            data = request.get_json()
+            data = request.get_json(silent=True)
             
-            if not data:
+            if not data and request.method == 'POST':
                 logger.warning("No JSON data provided in scrape request")
                 return jsonify({
                     'success': False,
@@ -231,7 +291,7 @@ def register_routes(app, limiter=None):
             
             # Validate request data
             try:
-                validated_data = validate_scrape_request(data)
+                validated_data = validate_scrape_request(data or {})
             except ValidationError as e:
                 logger.warning(f"Validation error: {str(e)}")
                 return jsonify({
@@ -246,7 +306,8 @@ def register_routes(app, limiter=None):
             pages = validated_data['pages']
             include_attributes = validated_data.get('include_attributes', False)
             
-            logger.info(f"Scraping: URL={url}, Selector={selector}, Pages={pages}")
+            selector_display = selector if selector else "all_content"
+            logger.info(f"Scraping: URL={url}, Selector={selector_display}, Pages={pages}")
             
             # Initialize scraper with config
             scraper = ScraperEngine(
@@ -274,7 +335,7 @@ def register_routes(app, limiter=None):
                 return jsonify({
                     'success': True,
                     'url': url,
-                    'selector': selector,
+                    'selector': selector_display,
                     'pages': pages if pages > 1 else None,
                     'count': result['count'],
                     'data': result['data'],
@@ -289,8 +350,6 @@ def register_routes(app, limiter=None):
                     'message': result.get('error', 'Unknown error occurred'),
                     'timestamp': datetime.utcnow().isoformat()
                 }), 400
-            
-        except ValueError as e:
             logger.error(f"JSON parsing error: {str(e)}")
             return jsonify({
                 'success': False,
@@ -494,27 +553,21 @@ def register_routes(app, limiter=None):
                     filename = exporter.generate_filename(prefix=selector)
                 
                 # Export to CSV
-                success, filepath = exporter.export_to_csv(df, filename=filename)
+                filepath = exporter.export_to_csv(df, filename=filename)
                 
-                if success:
-                    file_info = exporter.get_file_info(filepath)
-                    
-                    logger.info(f"Data exported successfully: {filepath}")
-                    
-                    return jsonify({
-                        'success': True,
-                        'message': 'Data exported successfully',
-                        'file_info': file_info,
-                        'download_url': f'/download/{filename}',
-                        'rows_exported': len(df),
-                        'timestamp': datetime.utcnow().isoformat()
-                    }), 200
-                else:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Export Error',
-                        'message': 'Failed to create CSV file'
-                    }), 400
+                file_info = exporter.get_file_info(filepath)
+                
+                logger.info(f"Data exported successfully: {filepath}")
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Data exported successfully',
+                    'filename': os.path.basename(filepath),
+                    'file_info': file_info,
+                    'download_url': f'/download/{os.path.basename(filepath)}',
+                    'rows_exported': len(df),
+                    'timestamp': datetime.utcnow().isoformat()
+                }), 200
             
             except Exception as e:
                 logger.error(f"Error exporting data: {str(e)}")
@@ -832,6 +885,457 @@ def register_routes(app, limiter=None):
                 'success': False,
                 'error': 'Server Error',
                 'message': 'An unexpected error occurred'
+            }), 500
+    
+    # Async Endpoints
+    @app.route('/scrape-async', methods=['POST'])
+    @limiter.limit("20 per minute")
+    def scrape_async():
+        """
+        Submit an async scraping task
+        Returns immediately with task_id for monitoring
+        
+        Expected JSON payload:
+        {
+            "url": "https://example.com",
+            "selector": "optional_css_selector",
+            "pages": 1,
+            "include_attributes": false
+        }
+        
+        Returns:
+            JSON response with task_id for tracking
+        """
+        logger.info("Async scrape endpoint called")
+        
+        try:
+            if request.content_type and 'application/json' not in request.content_type:
+                raise UnsupportedMediaType("Content-Type must be application/json")
+            
+            data = request.get_json(force=True)
+            
+            # Validate input
+            try:
+                validate_scrape_request(data)
+            except ValidationError as e:
+                logger.warning(f"Validation error: {str(e)}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Validation Error',
+                    'message': str(e)
+                }), 400
+            
+            url = data.get('url')
+            selector = data.get('selector')
+            pages = data.get('pages', 1)
+            include_attributes = data.get('include_attributes', False)
+            
+            # Submit async task
+            task = scrape_url.apply_async(
+                args=[url, selector, pages, include_attributes],
+                task_id=f"scrape_{datetime.utcnow().timestamp()}_{url[:20]}"
+            )
+            
+            logger.info(f"Async task submitted: {task.id}")
+            
+            return jsonify({
+                'success': True,
+                'task_id': task.id,
+                'message': 'Scraping task submitted successfully',
+                'status_url': f'/task/{task.id}',
+                'result_url': f'/task/{task.id}/result'
+            }), 202
+        
+        except Exception as e:
+            logger.error(f"Error in async scrape endpoint: {str(e)}", exc_info=True)
+            return jsonify({
+                'success': False,
+                'error': 'Server Error',
+                'message': 'Failed to submit scraping task'
+            }), 500
+    
+    @app.route('/task/<task_id>', methods=['GET'])
+    def get_task_status(task_id):
+        """
+        Get status of an async task
+        
+        Returns:
+            JSON response with task status and progress
+        """
+        logger.info(f"Task status requested: {task_id}")
+        
+        try:
+            task = celery_app.AsyncResult(task_id)
+            
+            response = {
+                'task_id': task_id,
+                'status': task.status,
+                'ready': task.ready(),
+                'successful': task.successful() if task.ready() else None
+            }
+            
+            if task.state == 'PROGRESS':
+                response['progress'] = task.info.get('current', 0)
+                response['total'] = task.info.get('total', 100)
+                response['status_message'] = task.info.get('status', 'Processing...')
+            
+            elif task.state == 'SUCCESS':
+                response['result'] = task.result
+                response['message'] = 'Task completed successfully'
+            
+            elif task.state == 'FAILURE':
+                response['error'] = str(task.info)
+                response['message'] = 'Task failed'
+                response['traceback'] = task.traceback
+            
+            return jsonify(response), 200
+        
+        except Exception as e:
+            logger.error(f"Error getting task status: {str(e)}")
+            return jsonify({
+                'success': False,
+                'error': 'Status Error',
+                'message': 'Failed to get task status'
+            }), 500
+    
+    @app.route('/task/<task_id>/result', methods=['GET'])
+    def get_task_result(task_id):
+        """
+        Get the result of a completed async task
+        
+        Returns:
+            JSON response with task result (if ready)
+        """
+        logger.info(f"Task result requested: {task_id}")
+        
+        try:
+            task = celery_app.AsyncResult(task_id)
+            
+            if not task.ready():
+                return jsonify({
+                    'success': False,
+                    'error': 'Not Ready',
+                    'message': f'Task is still {task.status.lower()}',
+                    'status': task.status
+                }), 202
+            
+            if task.state == 'SUCCESS':
+                return jsonify({
+                    'success': True,
+                    'task_id': task_id,
+                    'result': task.result
+                }), 200
+            
+            elif task.state == 'FAILURE':
+                return jsonify({
+                    'success': False,
+                    'error': 'Task Failed',
+                    'message': str(task.info),
+                    'task_id': task_id
+                }), 400
+            
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid State',
+                    'message': f'Task state is {task.status}',
+                    'task_id': task_id
+                }), 400
+        
+        except Exception as e:
+            logger.error(f"Error getting task result: {str(e)}")
+            return jsonify({
+                'success': False,
+                'error': 'Result Error',
+                'message': 'Failed to get task result'
+            }), 500
+    
+    @app.route('/task/<task_id>/cancel', methods=['POST', 'DELETE'])
+    def cancel_task(task_id):
+        """
+        Cancel a running async task
+        
+        Returns:
+            JSON response with cancellation status
+        """
+        logger.info(f"Task cancellation requested: {task_id}")
+        
+        try:
+            task = celery_app.AsyncResult(task_id)
+            
+            if task.status == 'SUCCESS':
+                return jsonify({
+                    'success': False,
+                    'error': 'Already Complete',
+                    'message': 'Task has already completed'
+                }), 400
+            
+            if task.status == 'FAILURE':
+                return jsonify({
+                    'success': False,
+                    'error': 'Already Failed',
+                    'message': 'Task has already failed'
+                }), 400
+            
+            # Revoke the task
+            celery_app.control.revoke(task_id, terminate=True)
+            
+            return jsonify({
+                'success': True,
+                'task_id': task_id,
+                'message': 'Task cancelled successfully'
+            }), 200
+        
+        except Exception as e:
+            logger.error(f"Error cancelling task: {str(e)}")
+            return jsonify({
+                'success': False,
+                'error': 'Cancel Error',
+                'message': 'Failed to cancel task'
+            }), 500
+    
+    @app.route('/tasks', methods=['GET'])
+    def list_tasks():
+        """
+        List recent tasks (from Celery inspect)
+        
+        Returns:
+            JSON response with task information
+        """
+        logger.info("Task list requested")
+        
+        try:
+            from celery.app.control import Inspect
+            inspect = Inspect(app=celery_app)
+            
+            # Get active, scheduled, and reserved tasks
+            active = inspect.active()
+            scheduled = inspect.scheduled()
+            reserved = inspect.reserved()
+            
+            task_summary = {
+                'active': len(active.get(list(active.keys())[0], [])) if active else 0,
+                'scheduled': len(scheduled.get(list(scheduled.keys())[0], [])) if scheduled else 0,
+                'reserved': len(reserved.get(list(reserved.keys())[0], [])) if reserved else 0
+            }
+            
+            return jsonify({
+                'success': True,
+                'summary': task_summary,
+                'tasks': {
+                    'active': active,
+                    'scheduled': scheduled,
+                    'reserved': reserved
+                }
+            }), 200
+        
+        except Exception as e:
+            logger.error(f"Error listing tasks: {str(e)}")
+            return jsonify({
+                'success': True,
+                'summary': {
+                    'active': 0,
+                    'scheduled': 0,
+                    'reserved': 0
+                },
+                'message': 'Unable to retrieve detailed task information'
+            }), 200
+    
+    # Social Media Scraping Endpoints
+    @app.route('/social/scrape-profile', methods=['POST'])
+    @limiter.limit("20 per minute")
+    def scrape_social_profile():
+        """
+        Scrape social media profile
+        
+        Expected JSON payload:
+        {
+            "platform": "instagram|twitter|linkedin|tiktok|youtube",
+            "username": "username_to_scrape"
+        }
+        
+        Returns:
+            JSON response with profile data
+        """
+        logger.info("Social media profile scrape endpoint called")
+        
+        try:
+            if request.content_type and 'application/json' not in request.content_type:
+                raise UnsupportedMediaType("Content-Type must be application/json")
+            
+            data = request.get_json(force=True)
+            
+            platform = data.get('platform', '').lower()
+            username = data.get('username', '').strip()
+            
+            if not platform or not username:
+                return jsonify({
+                    'success': False,
+                    'error': 'Validation Error',
+                    'message': 'platform and username are required'
+                }), 400
+            
+            # Import social media scraper
+            from scraper.social_media_scraper import scrape_social_media_profile
+            
+            result = scrape_social_media_profile(platform, username)
+            
+            if result['success']:
+                logger.info(f"Social profile scraped: {platform}/@{username}")
+                return jsonify({
+                    'success': True,
+                    'platform': platform,
+                    'username': username,
+                    'data': result.get('data'),
+                    'timestamp': datetime.utcnow().isoformat()
+                }), 200
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Scraping Error',
+                    'message': result.get('error'),
+                    'platform': platform
+                }), 400
+        
+        except Exception as e:
+            logger.error(f"Error in social profile scrape endpoint: {str(e)}", exc_info=True)
+            return jsonify({
+                'success': False,
+                'error': 'Server Error',
+                'message': 'Failed to scrape social media profile'
+            }), 500
+    
+    @app.route('/social/scrape-posts', methods=['POST'])
+    @limiter.limit("15 per minute")
+    def scrape_social_posts():
+        """
+        Scrape social media posts/content
+        
+        Expected JSON payload:
+        {
+            "platform": "instagram|twitter|youtube",
+            "username": "username_to_scrape",
+            "limit": 10 (optional, default: 10)
+        }
+        
+        Returns:
+            JSON response with posts data
+        """
+        logger.info("Social media posts scrape endpoint called")
+        
+        try:
+            if request.content_type and 'application/json' not in request.content_type:
+                raise UnsupportedMediaType("Content-Type must be application/json")
+            
+            data = request.get_json(force=True)
+            
+            platform = data.get('platform', '').lower()
+            username = data.get('username', '').strip()
+            limit = data.get('limit', 10)
+            
+            if not platform or not username:
+                return jsonify({
+                    'success': False,
+                    'error': 'Validation Error',
+                    'message': 'platform and username are required'
+                }), 400
+            
+            # Validate limit
+            limit = max(1, min(limit, 100))  # Between 1 and 100
+            
+            # Import social media scraper
+            from scraper.social_media_scraper import scrape_social_media_posts
+            
+            result = scrape_social_media_posts(platform, username, limit)
+            
+            if result['success']:
+                logger.info(f"Social posts scraped: {platform}/@{username} ({len(result.get('data', []))} items)")
+                return jsonify({
+                    'success': True,
+                    'platform': platform,
+                    'username': username,
+                    'count': result.get('count', 0),
+                    'data': result.get('data'),
+                    'timestamp': datetime.utcnow().isoformat()
+                }), 200
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Scraping Error',
+                    'message': result.get('error'),
+                    'platform': platform,
+                    'recommendation': result.get('recommendation')
+                }), 400
+        
+        except Exception as e:
+            logger.error(f"Error in social posts scrape endpoint: {str(e)}", exc_info=True)
+            return jsonify({
+                'success': False,
+                'error': 'Server Error',
+                'message': 'Failed to scrape social media posts'
+            }), 500
+    
+    @app.route('/social/platforms', methods=['GET'])
+    def get_social_platforms():
+        """
+        Get list of supported social media platforms
+        
+        Returns:
+            JSON response with platform list
+        """
+        logger.info("Social media platforms requested")
+        
+        try:
+            from scraper.social_media_scraper import SocialMediaScraperFactory
+            
+            platforms = SocialMediaScraperFactory.get_supported_platforms()
+            
+            platform_info = {
+                'instagram': {
+                    'name': 'Instagram',
+                    'capabilities': ['profile', 'posts'],
+                    'rate_limit': '200 requests/hour',
+                    'authentication': 'Not required (public data only)'
+                },
+                'twitter': {
+                    'name': 'Twitter/X',
+                    'capabilities': ['profile', 'tweets'],
+                    'rate_limit': '450 requests/hour',
+                    'authentication': 'Bearer token (optional, for enhanced data)'
+                },
+                'linkedin': {
+                    'name': 'LinkedIn',
+                    'capabilities': ['profile (limited)'],
+                    'rate_limit': '100 requests/hour',
+                    'authentication': 'Restricted - requires official API'
+                },
+                'tiktok': {
+                    'name': 'TikTok',
+                    'capabilities': ['profile (limited)'],
+                    'rate_limit': '100 requests/hour',
+                    'authentication': 'Requires Playwright/Selenium for videos'
+                },
+                'youtube': {
+                    'name': 'YouTube',
+                    'capabilities': ['channel', 'videos (with API key)'],
+                    'rate_limit': 'Quota-based',
+                    'authentication': 'API key recommended'
+                }
+            }
+            
+            return jsonify({
+                'success': True,
+                'platforms': platforms,
+                'details': platform_info,
+                'timestamp': datetime.utcnow().isoformat()
+            }), 200
+        
+        except Exception as e:
+            logger.error(f"Error getting platforms: {str(e)}")
+            return jsonify({
+                'success': False,
+                'error': 'Error',
+                'message': str(e)
             }), 500
     
     logger.info("All routes registered successfully")

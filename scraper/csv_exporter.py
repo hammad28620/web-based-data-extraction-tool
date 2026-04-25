@@ -7,7 +7,7 @@ import logging
 import os
 import pandas as pd
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional
 import tempfile
 
 logger = logging.getLogger(__name__)
@@ -36,21 +36,21 @@ class CSVExporter:
         
         logger.info(f"CSV Exporter initialized. Output directory: {output_dir}")
     
-    def generate_filename(self, prefix: str = 'scrape', include_timestamp: bool = True) -> str:
+    def generate_filename(self, prefix: str = 'data', timestamp: bool = True) -> str:
         """
         Generate CSV filename
         
         Args:
-            prefix (str): Filename prefix
-            include_timestamp (bool): Whether to include timestamp
+            prefix (str): Filename prefix (default: 'data')
+            timestamp (bool): Whether to include timestamp
             
         Returns:
             str: Generated filename
         """
         try:
-            if include_timestamp:
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                filename = f"{prefix}_{timestamp}.csv"
+            if timestamp:
+                ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"{prefix}_{ts}.csv"
             else:
                 filename = f"{prefix}.csv"
             
@@ -66,7 +66,7 @@ class CSVExporter:
                      df: pd.DataFrame, 
                      filename: Optional[str] = None,
                      include_index: bool = False,
-                     encoding: str = 'utf-8') -> Tuple[bool, str]:
+                     encoding: str = 'utf-8') -> str:
         """
         Export DataFrame to CSV file
         
@@ -77,16 +77,12 @@ class CSVExporter:
             encoding (str): File encoding
             
         Returns:
-            Tuple[bool, str]: (Success status, file path)
+            str: File path to exported CSV
             
         Raises:
-            ValueError: If DataFrame is empty
             IOError: If file write fails
         """
         try:
-            if df.empty:
-                raise ValueError("Cannot export empty DataFrame")
-            
             # Generate filename if not provided
             if filename is None:
                 filename = self.generate_filename()
@@ -97,7 +93,7 @@ class CSVExporter:
             logger.info(f"Exporting DataFrame to CSV: {filepath}")
             logger.info(f"DataFrame shape: {df.shape[0]} rows, {df.shape[1]} columns")
             
-            # Export to CSV
+            # Export to CSV - allow empty dataframes
             df.to_csv(
                 filepath,
                 index=include_index,
@@ -112,7 +108,7 @@ class CSVExporter:
             file_size = os.path.getsize(filepath)
             logger.info(f"CSV export successful. File size: {file_size} bytes")
             
-            return True, filepath
+            return filepath
         
         except Exception as e:
             logger.error(f"Error exporting to CSV: {str(e)}")
@@ -122,7 +118,7 @@ class CSVExporter:
                               df: pd.DataFrame,
                               filename: Optional[str] = None,
                               add_headers: bool = True,
-                              add_metadata: bool = False) -> Tuple[bool, str]:
+                              add_metadata: bool = False) -> str:
         """
         Export DataFrame with additional formatting
         
@@ -133,7 +129,7 @@ class CSVExporter:
             add_metadata (bool): Add metadata rows at top
             
         Returns:
-            Tuple[bool, str]: (Success status, file path)
+            str: File path to exported CSV
         """
         try:
             if filename is None:
@@ -160,7 +156,7 @@ class CSVExporter:
             
             logger.info("Export with formatting completed")
             
-            return True, filepath
+            return filepath
         
         except Exception as e:
             logger.error(f"Error exporting with formatting: {str(e)}")
@@ -168,7 +164,7 @@ class CSVExporter:
     
     def export_to_temp_file(self, 
                            df: pd.DataFrame,
-                           prefix: str = 'scrape_') -> Tuple[bool, str]:
+                           prefix: str = 'scrape_') -> str:
         """
         Export DataFrame to temporary file
         
@@ -177,7 +173,7 @@ class CSVExporter:
             prefix (str): Temp file prefix
             
         Returns:
-            Tuple[bool, str]: (Success status, temp file path)
+            str: Temp file path
         """
         try:
             logger.info("Exporting to temporary file")
@@ -195,7 +191,7 @@ class CSVExporter:
             
             logger.info(f"Temporary file created: {filepath}")
             
-            return True, filepath
+            return filepath
         
         except Exception as e:
             logger.error(f"Error exporting to temp file: {str(e)}")
@@ -220,6 +216,7 @@ class CSVExporter:
             info = {
                 'filename': os.path.basename(filepath),
                 'path': filepath,
+                'file_size': file_stat.st_size,  # Bytes
                 'size_bytes': file_stat.st_size,
                 'size_kb': round(file_stat.st_size / 1024, 2),
                 'created': datetime.fromtimestamp(file_stat.st_ctime).isoformat(),
