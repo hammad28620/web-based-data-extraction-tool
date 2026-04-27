@@ -774,3 +774,188 @@ class ScraperEngine:
                 'count': len(all_data),
                 'error': str(e)
             }
+    
+    def scrape_urls(self, 
+                    urls: List[str], 
+                    selector: Optional[str] = None, 
+                    include_attributes: bool = False) -> Dict:
+        """
+        Scrape a list of specific URLs
+        
+        Args:
+            urls (List[str]): List of URLs to scrape
+            selector (str): CSS selector for data extraction
+            include_attributes (bool): Whether to include element attributes
+            
+        Returns:
+            Dict: Combined results from all URLs
+        """
+        all_data = []
+        urls_scraped = 0
+        
+        try:
+            for url in urls:
+                logger.info(f"Scraping URL {urls_scraped + 1}/{len(urls)}: {url}")
+                
+                try:
+                    # Fetch and parse
+                    html_content = self.fetch_page(url)
+                    soup = self.parse_html(html_content)
+                    
+                    if not soup:
+                        logger.warning(f"Failed to parse HTML for {url}")
+                        continue
+                        
+                    # Extract data
+                    if include_attributes:
+                        data = self.extract_with_attributes(soup, selector)
+                    else:
+                        data = self.extract_elements(soup, selector)
+                        
+                    all_data.extend(data)
+                    urls_scraped += 1
+                    
+                    # Add delay between requests
+                    if urls_scraped < len(urls):
+                        logger.info(f"Waiting {self.scraping_delay} seconds before next request...")
+                        time.sleep(self.scraping_delay)
+                        
+                except Exception as e:
+                    logger.error(f"Failed to scrape {url}: {str(e)}")
+                    continue
+                    
+            return {
+                'success': True,
+                'urls_scraped': urls_scraped,
+                'total_urls': len(urls),
+                'data': all_data,
+                'count': len(all_data),
+                'message': f'Successfully scraped {urls_scraped} pages with {len(all_data)} total items'
+            }
+            
+        except Exception as e:
+            logger.error(f"Multi-URL scraping failed: {str(e)}")
+            return {
+                'success': False,
+                'urls_scraped': urls_scraped,
+                'data': all_data,
+                'count': len(all_data),
+                'error': str(e)
+            }
+
+    def discover_links(self, url: str, max_links: int = 100, auto_pagination: bool = True) -> Dict:
+        """
+        Discover links on a webpage, optionally following pagination
+        
+        Args:
+            url (str): URL to start discovery from
+            max_links (int): Maximum number of links to return
+            auto_pagination (bool): Whether to follow "Next" links to find more pages
+            
+        Returns:
+            Dict: Discovered links
+        """
+        try:
+            from urllib.parse import urljoin, urlparse
+            from scraper.pagination_handler import PaginationHandler
+            
+            logger.info(f"Starting link discovery on: {url} (auto_pagination={auto_pagination})")
+            
+            links = []
+            seen_urls = {url} # Skip the starting URL itself if it appears as a link
+            pages_to_visit = [url]
+            pages_processed = 0
+            max_pages = 5 if auto_pagination else 1
+            
+            pagination_handler = PaginationHandler()
+            
+            # Extract base domain for filtering
+            base_domain = urlparse(url).netloc
+            
+            while pages_to_visit and len(links) < max_links and pages_processed < max_pages:
+                current_url = pages_to_visit.pop(0)
+                pages_processed += 1
+                
+                logger.info(f"Processing discovery page {pages_processed}: {current_url}")
+                
+                try:
+                    html_content = self.fetch_page(current_url)
+                    if not html_content:
+                        continue
+                        
+                    soup = self.parse_html(html_content)
+                    if not soup:
+                        continue
+                    
+                    # 1. Find all links on this page
+                    for link_elem in soup.find_all('a', href=True):
+                        href = link_elem.get('href', '').strip()
+                        
+                        if not href or href.startswith('#') or href.startswith('javascript:'):
+                            continue
+                        
+                        # Convert relative URLs to absolute
+                        absolute_url = urljoin(current_url, href)
+                        
+                        # Filter by domain (same-domain links only)
+                        parsed_link = urlparse(absolute_url)
+                        if parsed_link.netloc != base_domain:
+                            continue
+                            
+                        # Normalize URL (remove fragments)
+                        normalized_url = absolute_url.split('#')[0].rstrip('/')
+                        
+                        if normalized_url in seen_urls:
+                            continue
+                            
+                        # Get link text
+                        link_text = link_elem.get_text(strip=True)
+                        if not link_text:
+                            link_text = normalized_url.split('/')[-1] or 'Untitled Page'
+                            
+                        link_data = {
+                            'url': normalized_url,
+                            'text': link_text[:100],
+                            'type': 'link'
+                        }
+                        
+                        links.append(link_data)
+                        seen_urls.add(normalized_url)
+                        
+                        if len(links) >= max_links:
+                            break
+                    
+                    # 2. Find next page if auto_pagination is enabled
+                    if auto_pagination and pages_processed < max_pages and len(links) < max_links:
+                        next_page = pagination_handler.get_next_page_url(soup, current_url)
+                        if next_page and next_page not in seen_urls:
+                            # Add to front of queue to prioritize pagination over other links
+                            pages_to_visit.insert(0, next_page)
+                            # We don't add next_page to links list usually, it's just a source
+                            seen_urls.add(next_page) 
+                
+                except Exception as e:
+                    logger.error(f"Error during discovery on {current_url}: {str(e)}")
+                    continue
+                    
+                # Small delay between discovery requests
+                if pages_to_visit and pages_processed < max_pages:
+                    time.sleep(self.scraping_delay)
+            
+            logger.info(f"Discovery finished. Found {len(links)} unique links across {pages_processed} pages.")
+            
+            return {
+                'success': True,
+                'base_url': url,
+                'domain': base_domain,
+                'links': links[:max_links],
+                'count': len(links[:max_links]),
+                'pages_processed': pages_processed
+            }
+            
+        except Exception as e:
+            logger.error(f"Link discovery failed: {str(e)}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e)
+            }

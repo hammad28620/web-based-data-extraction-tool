@@ -52,10 +52,49 @@
 
 
 
-            <!-- Pages Input (Optional) -->
+            <!-- Auto Discover Pages -->
             <div class="form-group">
+                <div class="checkbox-group">
+                    <input 
+                        type="checkbox"
+                        id="autoDiscoverCheck"
+                        name="autoDiscover"
+                    >
+                    <label for="autoDiscoverCheck" class="checkbox-label">
+                        🔍 Auto-Discover Pages
+                    </label>
+                </div>
+                <div class="form-hint">Automatically discover and list all pages on the website</div>
+            </div>
+
+            <!-- Discover Button -->
+            <div class="form-group">
+                <button type="button" class="btn btn-info" id="discoverPagesBtn" style="display: none;">
+                    🔎 Discover Pages
+                </button>
+                <div id="discoveryLoadingIndicator" class="loading-indicator" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Discovering pages...</p>
+                </div>
+            </div>
+
+            <!-- Discovered Pages Section -->
+            <div id="discoveredPagesSection" style="display: none;">
+                <div class="form-group">
+                    <label class="form-label">📄 Discovered Pages</label>
+                    <div class="pages-list" id="pagesList">
+                        <!-- Pages will be inserted here -->
+                    </div>
+                    <div class="form-hint">
+                        Select which pages to scrape (first 5 will be auto-selected if auto-discover is enabled)
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pages Input (Optional - Manual Mode) -->
+            <div class="form-group" id="pagesInputGroup">
                 <label for="pagesInput" class="form-label">
-                    Number of Pages <span class="optional">(Optional)</span>
+                    Number of Pages <span class="optional">(Optional - Manual Mode)</span>
                 </label>
                 <input 
                     type="number"
@@ -68,7 +107,7 @@
                     value="1"
                     autocomplete="off"
                 >
-                <div class="form-hint">Maximum pages to scrape (default: 1)</div>
+                <div class="form-hint">Maximum pages to scrape (default: 1) - Used when auto-discover is disabled</div>
             </div>
 
             <!-- Submit Button -->
@@ -84,48 +123,6 @@
                 </button>
             </div>
         </form>
-    </div>
-</section>
-
-<!-- Results Section -->
-<section class="results-section" id="resultsSection" style="display: none;">
-    <div class="results-header">
-        <h3>Extracted Data</h3>
-        <div class="results-actions">
-            <button id="downloadCsvBtn" class="btn btn-success" style="display: none;">
-                📥 Download CSV
-            </button>
-            <button id="clearResultsBtn" class="btn btn-secondary">
-                Clear Results
-            </button>
-        </div>
-    </div>
-
-    <!-- Results Info -->
-    <div class="results-info">
-        <p>Found <span id="resultCount" class="highlight">0</span> items</p>
-    </div>
-
-    <!-- Loading Spinner -->
-    <div id="loadingIndicator" class="loading-indicator" style="display: none;">
-        <div class="spinner"></div>
-        <p>Scraping data...</p>
-    </div>
-
-    <!-- Results Table -->
-    <div id="resultsTableContainer" class="table-responsive" style="display: none;">
-        <table id="resultsTable" class="results-table">
-            <thead id="tableHead">
-                <tr></tr>
-            </thead>
-            <tbody id="tableBody">
-            </tbody>
-        </table>
-    </div>
-
-    <!-- No Results Message -->
-    <div id="noResultsMessage" class="no-results" style="display: none;">
-        <p>No data was extracted. Try a different selector or URL.</p>
     </div>
 </section>
 
@@ -197,24 +194,22 @@
                 </label>
                 <select id="platformSelect" class="form-control" required>
                     <option value="">Select a platform...</option>
-                    <option value="twitter">Twitter/X</option>
                     <option value="instagram">Instagram</option>
-                    <option value="linkedin">LinkedIn</option>
-                    <option value="tiktok">TikTok</option>
                     <option value="youtube">YouTube</option>
+                    <option value="facebook">Facebook</option>
                 </select>
                 <div class="form-hint">Choose the social media platform</div>
             </div>
 
             <div class="form-group">
                 <label for="usernameInput" class="form-label">
-                    Username <span class="required">*</span>
+                    Username/Handle <span class="required">*</span>
                 </label>
                 <input 
                     type="text"
                     id="usernameInput"
                     class="form-control"
-                    placeholder="e.g., nasa, cristiano, etc."
+                    placeholder="e.g., nasa, @nasa, etc."
                     required
                 >
                 <div class="form-hint">Enter the username or profile handle</div>
@@ -241,24 +236,20 @@
                 </label>
                 <select id="postsPlatformSelect" class="form-control" required>
                     <option value="">Select a platform...</option>
-                    <option value="twitter">Twitter/X</option>
-                    <option value="instagram">Instagram</option>
-                    <option value="linkedin">LinkedIn</option>
-                    <option value="tiktok">TikTok</option>
                     <option value="youtube">YouTube</option>
                 </select>
-                <div class="form-hint">Choose the social media platform</div>
+                <div class="form-hint">Choose the social media platform (YouTube currently supports public post/video scraping)</div>
             </div>
 
             <div class="form-group">
                 <label for="postsUsernameInput" class="form-label">
-                    Username <span class="required">*</span>
+                    Username/Handle <span class="required">*</span>
                 </label>
                 <input 
                     type="text"
                     id="postsUsernameInput"
                     class="form-control"
-                    placeholder="e.g., nasa, cristiano, etc."
+                    placeholder="e.g., nasa"
                     required
                 >
                 <div class="form-hint">Enter the username or profile handle</div>
@@ -331,7 +322,7 @@
     <!-- Posts Results -->
     <div id="socialPostsResultsContainer" style="display: none;">
         <div class="results-info">
-            <p>Found <span id="socialResultCount" class="highlight">0</span> posts</p>
+            <p>Found <span id="socialResultCount" class="highlight">0</span> items</p>
         </div>
         <div id="postsListContainer" class="posts-list">
             <!-- Posts will be inserted here -->
@@ -354,7 +345,7 @@
         </div>
         <div class="info-card">
             <h4>📱 Social Media Scraper</h4>
-            <p>Scrape public profiles and posts from major social media platforms including Twitter, Instagram, LinkedIn, TikTok, and YouTube.</p>
+            <p>Scrape public profiles and stats from Instagram, YouTube, and Facebook without needing any API keys.</p>
         </div>
         <div class="info-card">
             <h4>📥 Easy Export</h4>

@@ -265,6 +265,95 @@ body {
 }
 
 /* ================================================
+   Checkbox and Pages List Styles
+   ================================================ */
+
+.checkbox-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background-color: var(--light-bg);
+    border-radius: var(--border-radius);
+    border: 2px solid var(--border-color);
+}
+
+.checkbox-group input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+.checkbox-label {
+    font-weight: 600;
+    color: var(--secondary-color);
+    cursor: pointer;
+    margin: 0;
+}
+
+.pages-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background-color: var(--light-bg);
+    border-radius: var(--border-radius);
+}
+
+.page-item {
+    background: white;
+    border: 2px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 1rem;
+    cursor: pointer;
+    transition: var(--transition);
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.page-item:hover {
+    border-color: var(--primary-color);
+    box-shadow: var(--shadow);
+}
+
+.page-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    cursor: pointer;
+}
+
+.page-item.selected {
+    background-color: rgba(52, 152, 219, 0.1);
+    border-color: var(--primary-color);
+}
+
+.page-item-label {
+    flex: 1;
+    cursor: pointer;
+    font-size: 0.9rem;
+    word-break: break-word;
+}
+
+.page-item-label strong {
+    display: block;
+    color: var(--secondary-color);
+    margin-bottom: 0.25rem;
+}
+
+.page-item-label small {
+    color: #7f8c8d;
+    display: block;
+    font-size: 0.8rem;
+}
+
+/* ================================================
+   Buttons
+   ================================================ */
+
+/* ================================================
    Buttons
    ================================================ */
 
@@ -315,6 +404,17 @@ body {
 
 .btn-success:hover:not(:disabled) {
     background-color: #229954;
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+}
+
+.btn-info {
+    background-color: #3498db;
+    color: white;
+}
+
+.btn-info:hover:not(:disabled) {
+    background-color: #2980b9;
     box-shadow: var(--shadow-lg);
     transform: translateY(-2px);
 }

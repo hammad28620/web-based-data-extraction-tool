@@ -251,6 +251,92 @@ def register_routes(app, limiter=None):
                 'message': 'Failed to load the main page'
             }), 500
     
+    @app.route('/discover-pages', methods=['POST'])
+    @limiter.limit("20 per minute")
+    def discover_pages():
+        """
+        Page discovery endpoint (Rate limited: 20 per minute)
+        Discovers all links/pages on a website
+        
+        Expected JSON payload:
+        {
+            "url": "https://example.com"
+        }
+        
+        Returns:
+            JSON response with discovered pages
+        """
+        logger.info("Discover pages endpoint called")
+        
+        try:
+            # Get JSON data from request
+            data = request.get_json(silent=True)
+            
+            if not data or 'url' not in data:
+                return jsonify({
+                    'success': False,
+                    'error': 'Missing URL',
+                    'message': 'URL parameter is required'
+                }), 400
+            
+            url = data['url'].strip()
+            
+            if not url.startswith('http://') and not url.startswith('https://'):
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid URL',
+                    'message': 'URL must start with http:// or https://'
+                }), 400
+            
+            logger.info(f"Discovering pages for: {url}")
+            
+            # Initialize scraper
+            scraper = ScraperEngine(
+                request_timeout=app.config['REQUEST_TIMEOUT'],
+                scraping_delay=app.config['SCRAPING_DELAY'],
+                user_agent=app.config['USER_AGENT']
+            )
+            
+            # Discover links
+            result = scraper.discover_links(url)
+            
+            if result['success']:
+                # Format discovered pages
+                pages = []
+                for link in result.get('links', [])[:50]:  # Limit to first 50
+                    pages.append({
+                        'title': link.get('text', 'Untitled'),
+                        'url': link['url'],
+                        'type': link.get('type', 'link')
+                    })
+                
+                logger.info(f"Discovered {len(pages)} pages")
+                
+                return jsonify({
+                    'success': True,
+                    'url': url,
+                    'count': len(pages),
+                    'pages': pages,
+                    'timestamp': datetime.utcnow().isoformat()
+                }), 200
+            else:
+                logger.error(f"Page discovery failed: {result.get('error')}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Discovery Failed',
+                    'message': result.get('error', 'Failed to discover pages'),
+                    'timestamp': datetime.utcnow().isoformat()
+                }), 400
+        
+        except Exception as e:
+            logger.error(f"Page discovery error: {str(e)}", exc_info=True)
+            return jsonify({
+                'success': False,
+                'error': 'Server Error',
+                'message': 'An error occurred while discovering pages',
+                'timestamp': datetime.utcnow().isoformat()
+            }), 500
+    
     @app.route('/scrape', methods=['POST'])
     @limiter.limit("10 per minute")
     def scrape():
@@ -305,9 +391,9 @@ def register_routes(app, limiter=None):
             selector = validated_data['selector']
             pages = validated_data['pages']
             include_attributes = validated_data.get('include_attributes', False)
+            selected_pages = validated_data.get('selected_pages', [])
             
             selector_display = selector if selector else "all_content"
-            logger.info(f"Scraping: URL={url}, Selector={selector_display}, Pages={pages}")
             
             # Initialize scraper with config
             scraper = ScraperEngine(
@@ -317,13 +403,22 @@ def register_routes(app, limiter=None):
             )
             
             # Perform scraping
-            if pages > 1:
+            if selected_pages:
+                logger.info(f"Scraping {len(selected_pages)} selected pages")
+                result = scraper.scrape_urls(
+                    urls=selected_pages,
+                    selector=selector,
+                    include_attributes=include_attributes
+                )
+            elif pages > 1:
+                logger.info(f"Scraping multiple pages: URL={url}, Pages={pages}")
                 result = scraper.scrape_multiple_pages(
                     start_url=url,
                     selector=selector,
                     pages=pages
                 )
             else:
+                logger.info(f"Scraping single page: URL={url}, Selector={selector_display}")
                 result = scraper.scrape(
                     url=url,
                     selector=selector,
@@ -1293,33 +1388,18 @@ def register_routes(app, limiter=None):
             platform_info = {
                 'instagram': {
                     'name': 'Instagram',
-                    'capabilities': ['profile', 'posts'],
-                    'rate_limit': '200 requests/hour',
-                    'authentication': 'Not required (public data only)'
-                },
-                'twitter': {
-                    'name': 'Twitter/X',
-                    'capabilities': ['profile', 'tweets'],
-                    'rate_limit': '450 requests/hour',
-                    'authentication': 'Bearer token (optional, for enhanced data)'
-                },
-                'linkedin': {
-                    'name': 'LinkedIn',
-                    'capabilities': ['profile (limited)'],
-                    'rate_limit': '100 requests/hour',
-                    'authentication': 'Restricted - requires official API'
-                },
-                'tiktok': {
-                    'name': 'TikTok',
-                    'capabilities': ['profile (limited)'],
-                    'rate_limit': '100 requests/hour',
-                    'authentication': 'Requires Playwright/Selenium for videos'
+                    'capabilities': ['profile'],
+                    'authentication': 'Not required'
                 },
                 'youtube': {
                     'name': 'YouTube',
-                    'capabilities': ['channel', 'videos (with API key)'],
-                    'rate_limit': 'Quota-based',
-                    'authentication': 'API key recommended'
+                    'capabilities': ['profile', 'videos'],
+                    'authentication': 'Not required'
+                },
+                'facebook': {
+                    'name': 'Facebook',
+                    'capabilities': ['profile'],
+                    'authentication': 'Not required'
                 }
             }
             

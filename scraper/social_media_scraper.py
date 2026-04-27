@@ -19,9 +19,6 @@ logger = logging.getLogger(__name__)
 class SocialMediaPlatform(Enum):
     """Supported social media platforms"""
     INSTAGRAM = "instagram"
-    TWITTER = "twitter"
-    LINKEDIN = "linkedin"
-    TIKTOK = "tiktok"
     YOUTUBE = "youtube"
     FACEBOOK = "facebook"
 
@@ -84,44 +81,65 @@ class SocialMediaScraper(ABC):
 
 
 class InstagramScraper(SocialMediaScraper):
-    """Instagram profile and content scraper"""
+    """Instagram profile and content scraper using metadata"""
     
     BASE_URL = "https://www.instagram.com"
     
     def scrape_profile(self, username: str) -> Dict:
         """
-        Scrape Instagram user profile
-        
-        Args:
-            username (str): Instagram username
-            
-        Returns:
-            Dictionary with profile info
+        Scrape Instagram user profile using OG metadata
         """
         try:
-            # Instagram API endpoint (public data only)
-            url = f"{self.BASE_URL}/{username}/?__a=1&__d=dis"
-            response = self._make_request(url)
+            url = f"{self.BASE_URL}/{username}/"
+            # Use a generic bot User-Agent to get cleaner metadata
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+                'Accept-Language': 'en-US,en;q=0.9'
+            }
+            response = requests.get(url, headers=headers, timeout=self.request_timeout)
             
-            if not response:
-                return {'success': False, 'error': 'Failed to fetch profile'}
+            if response.status_code != 200:
+                return {'success': False, 'error': f'Failed to fetch profile (Status: {response.status_code})'}
             
-            data = response.json()
-            user = data.get('graphql', {}).get('user', {})
+            html = response.text
+            import re
             
+            # Extract info from og:description
+            # Example: "105M Followers, 95 Following, 4,764 Posts - See Instagram photos and videos from NASA (@nasa)"
+            desc_match = re.search(r'<meta property="og:description" content="([^"]+)"', html)
+            if not desc_match:
+                return {'success': False, 'error': 'Could not find profile metadata'}
+            
+            desc = desc_match.group(1)
+            
+            # Simple parsing of the description string
+            follower_count = 0
+            following_count = 0
+            post_count = 0
+            
+            parts = desc.split(',')
+            if len(parts) >= 3:
+                follower_count = parts[0].strip().split(' ')[0]
+                following_count = parts[1].strip().split(' ')[0]
+                post_count = parts[2].strip().split(' ')[0]
+            
+            # Extract profile pic
+            pic_match = re.search(r'<meta property="og:image" content="([^"]+)"', html)
+            profile_pic = pic_match.group(1) if pic_match else ''
+            
+            # Extract name
+            title_match = re.search(r'<meta property="og:title" content="([^"]+)"', html)
+            full_name = title_match.group(1).split(' (')[0] if title_match else username
+
             profile = {
                 'platform': 'instagram',
                 'username': username,
-                'follower_count': user.get('edge_followed_by', {}).get('total_count', 0),
-                'following_count': user.get('edge_follow', {}).get('total_count', 0),
-                'post_count': user.get('edge_owner_to_timeline_media', {}).get('total_count', 0),
-                'bio': user.get('biography', ''),
-                'full_name': user.get('full_name', ''),
-                'website': user.get('external_url', ''),
-                'email': user.get('public_email', ''),
-                'profile_pic': user.get('profile_pic_url_hd', ''),
-                'verified': user.get('is_verified', False),
-                'private': user.get('is_private', False),
+                'follower_count': follower_count,
+                'following_count': following_count,
+                'post_count': post_count,
+                'full_name': full_name,
+                'profile_pic': profile_pic,
+                'url': url,
                 'scraped_at': datetime.utcnow().isoformat()
             }
             
@@ -133,388 +151,207 @@ class InstagramScraper(SocialMediaScraper):
     
     def scrape_posts(self, username: str, limit: int = 10) -> Dict:
         """
-        Scrape Instagram user posts
-        
-        Args:
-            username (str): Instagram username
-            limit (int): Maximum posts to scrape
-            
-        Returns:
-            Dictionary with posts list
-        """
-        try:
-            url = f"{self.BASE_URL}/{username}/?__a=1&__d=dis"
-            response = self._make_request(url)
-            
-            if not response:
-                return {'success': False, 'error': 'Failed to fetch posts'}
-            
-            data = response.json()
-            edges = data.get('graphql', {}).get('user', {}).get(
-                'edge_owner_to_timeline_media', {}
-            ).get('edges', [])
-            
-            posts = []
-            for edge in edges[:limit]:
-                node = edge.get('node', {})
-                post = {
-                    'post_id': node.get('id'),
-                    'caption': node.get('edge_media_to_caption', {}).get('edges', [{}])[0].get('node', {}).get('text', ''),
-                    'likes': node.get('edge_liked_by', {}).get('total_count', 0),
-                    'comments': node.get('edge_media_to_comment', {}).get('total_count', 0),
-                    'timestamp': node.get('taken_at_timestamp', ''),
-                    'media_type': node.get('__typename', ''),
-                    'image_url': node.get('display_url', ''),
-                    'url': f"{self.BASE_URL}/p/{node.get('shortcode', '')}/",
-                    'scraped_at': datetime.utcnow().isoformat()
-                }
-                posts.append(post)
-            
-            return {'success': True, 'data': posts, 'count': len(posts)}
-            
-        except Exception as e:
-            logger.error(f"Instagram posts scrape error: {str(e)}")
-            return {'success': False, 'error': str(e)}
-
-
-class TwitterScraper(SocialMediaScraper):
-    """Twitter/X profile and tweet scraper"""
-    
-    BASE_URL = "https://twitter.com"
-    API_URL = "https://api.twitter.com/2"
-    
-    def __init__(self, bearer_token: Optional[str] = None, **kwargs):
-        """Initialize Twitter scraper with optional bearer token"""
-        super().__init__(**kwargs)
-        self.bearer_token = bearer_token
-        if bearer_token:
-            self.headers['Authorization'] = f'Bearer {bearer_token}'
-    
-    def scrape_profile(self, username: str) -> Dict:
-        """
-        Scrape Twitter user profile (public data)
-        
-        Args:
-            username (str): Twitter username (without @)
-            
-        Returns:
-            Dictionary with profile info
-        """
-        try:
-            # Try API first if bearer token available
-            if self.bearer_token:
-                return self._scrape_profile_api(username)
-            
-            # Fallback to scraping (limited data)
-            url = f"{self.BASE_URL}/{username}"
-            response = self._make_request(url)
-            
-            if not response:
-                return {'success': False, 'error': 'Failed to fetch Twitter profile'}
-            
-            # Extract basic info from HTML
-            profile = {
-                'platform': 'twitter',
-                'username': username,
-                'url': url,
-                'note': 'Limited data - requires API bearer token for full profile data',
-                'scraped_at': datetime.utcnow().isoformat()
-            }
-            
-            return {'success': True, 'data': profile}
-            
-        except Exception as e:
-            logger.error(f"Twitter profile scrape error: {str(e)}")
-            return {'success': False, 'error': str(e)}
-    
-    def _scrape_profile_api(self, username: str) -> Dict:
-        """Scrape Twitter profile using official API"""
-        try:
-            # Get user ID first
-            url = f"{self.API_URL}/users/by/username/{username}"
-            response = self._make_request(url, params={'user.fields': 'public_metrics,description,verified'})
-            
-            if not response:
-                return {'success': False, 'error': 'Failed to fetch Twitter user'}
-            
-            data = response.json()
-            if 'errors' in data:
-                return {'success': False, 'error': data['errors'][0]['message']}
-            
-            user_data = data.get('data', {})
-            profile = {
-                'platform': 'twitter',
-                'username': username,
-                'name': user_data.get('name', ''),
-                'description': user_data.get('description', ''),
-                'verified': user_data.get('verified', False),
-                'followers': user_data.get('public_metrics', {}).get('followers_count', 0),
-                'following': user_data.get('public_metrics', {}).get('following_count', 0),
-                'tweets': user_data.get('public_metrics', {}).get('tweet_count', 0),
-                'url': f"{self.BASE_URL}/{username}",
-                'scraped_at': datetime.utcnow().isoformat()
-            }
-            
-            return {'success': True, 'data': profile}
-            
-        except Exception as e:
-            logger.error(f"Twitter API scrape error: {str(e)}")
-            return {'success': False, 'error': str(e)}
-    
-    def scrape_posts(self, username: str, limit: int = 10) -> Dict:
-        """
-        Scrape Twitter tweets (requires API bearer token)
-        
-        Args:
-            username (str): Twitter username
-            limit (int): Max tweets to scrape
-            
-        Returns:
-            Dictionary with tweets list
-        """
-        if not self.bearer_token:
-            return {
-                'success': False,
-                'error': 'Twitter API bearer token required for tweet scraping'
-            }
-        
-        try:
-            # Get user ID
-            user_url = f"{self.API_URL}/users/by/username/{username}"
-            response = self._make_request(user_url)
-            
-            if not response:
-                return {'success': False, 'error': 'Failed to get user ID'}
-            
-            user_id = response.json().get('data', {}).get('id')
-            if not user_id:
-                return {'success': False, 'error': 'User not found'}
-            
-            # Get tweets
-            tweets_url = f"{self.API_URL}/users/{user_id}/tweets"
-            response = self._make_request(
-                tweets_url,
-                params={
-                    'max_results': min(limit, 100),
-                    'tweet.fields': 'public_metrics,created_at',
-                    'expansions': 'author_id'
-                }
-            )
-            
-            if not response:
-                return {'success': False, 'error': 'Failed to fetch tweets'}
-            
-            data = response.json()
-            tweets = []
-            for tweet in data.get('data', []):
-                tweets.append({
-                    'tweet_id': tweet.get('id'),
-                    'text': tweet.get('text', ''),
-                    'created_at': tweet.get('created_at', ''),
-                    'likes': tweet.get('public_metrics', {}).get('like_count', 0),
-                    'retweets': tweet.get('public_metrics', {}).get('retweet_count', 0),
-                    'replies': tweet.get('public_metrics', {}).get('reply_count', 0),
-                    'url': f"{self.BASE_URL}/{username}/status/{tweet.get('id')}",
-                    'scraped_at': datetime.utcnow().isoformat()
-                })
-            
-            return {'success': True, 'data': tweets, 'count': len(tweets)}
-            
-        except Exception as e:
-            logger.error(f"Twitter tweets scrape error: {str(e)}")
-            return {'success': False, 'error': str(e)}
-
-
-class LinkedInScraper(SocialMediaScraper):
-    """LinkedIn profile scraper (public profiles only)"""
-    
-    BASE_URL = "https://www.linkedin.com"
-    
-    def scrape_profile(self, username: str) -> Dict:
-        """
-        Scrape LinkedIn public profile
-        
-        Args:
-            username (str): LinkedIn username or ID
-            
-        Returns:
-            Dictionary with profile info
-        """
-        try:
-            url = f"{self.BASE_URL}/in/{username}/"
-            response = self._make_request(url)
-            
-            if not response:
-                return {'success': False, 'error': 'Failed to access LinkedIn profile'}
-            
-            # LinkedIn heavily restricts scraping - requires authentication
-            profile = {
-                'platform': 'linkedin',
-                'username': username,
-                'url': url,
-                'note': 'LinkedIn restricts automated scraping. Use official APIs or manual access.',
-                'scraped_at': datetime.utcnow().isoformat()
-            }
-            
-            return {'success': True, 'data': profile}
-            
-        except Exception as e:
-            logger.error(f"LinkedIn profile scrape error: {str(e)}")
-            return {'success': False, 'error': str(e)}
-    
-    def scrape_posts(self, username: str, limit: int = 10) -> Dict:
-        """LinkedIn posts scraping (limited, requires authentication)"""
-        return {
-            'success': False,
-            'error': 'LinkedIn post scraping requires official API or account authentication'
-        }
-
-
-class TikTokScraper(SocialMediaScraper):
-    """TikTok profile and video scraper"""
-    
-    BASE_URL = "https://www.tiktok.com"
-    
-    def scrape_profile(self, username: str) -> Dict:
-        """
-        Scrape TikTok user profile
-        
-        Args:
-            username (str): TikTok username (without @)
-            
-        Returns:
-            Dictionary with profile info
-        """
-        try:
-            url = f"{self.BASE_URL}/@{username}"
-            response = self._make_request(url)
-            
-            if not response:
-                return {'success': False, 'error': 'Failed to access TikTok profile'}
-            
-            # Basic profile info from public page
-            profile = {
-                'platform': 'tiktok',
-                'username': username,
-                'url': url,
-                'note': 'TikTok profiles require dynamic rendering for full data',
-                'scraped_at': datetime.utcnow().isoformat()
-            }
-            
-            return {'success': True, 'data': profile}
-            
-        except Exception as e:
-            logger.error(f"TikTok profile scrape error: {str(e)}")
-            return {'success': False, 'error': str(e)}
-    
-    def scrape_posts(self, username: str, limit: int = 10) -> Dict:
-        """
-        Scrape TikTok videos (limited without dynamic rendering)
-        
-        Args:
-            username (str): TikTok username
-            limit (int): Max videos to scrape
-            
-        Returns:
-            Dictionary with videos list
+        Instagram post scraping is highly restricted without API/Login.
+        Returning a helpful error message.
         """
         return {
-            'success': False,
-            'error': 'TikTok video scraping requires Selenium/Playwright for JavaScript rendering',
-            'recommendation': 'Use dynamic_scraper.py with Playwright for TikTok content'
+            'success': False, 
+            'error': 'Instagram post scraping requires authentication or a specialized API due to recent changes.',
+            'recommendation': 'Public metadata only provides profile overview.'
         }
 
 
 class YouTubeScraper(SocialMediaScraper):
-    """YouTube channel and video scraper"""
+    """YouTube channel scraper using ytInitialData"""
     
     BASE_URL = "https://www.youtube.com"
     
-    def __init__(self, api_key: Optional[str] = None, **kwargs):
-        """Initialize YouTube scraper with optional API key"""
-        super().__init__(**kwargs)
-        self.api_key = api_key
-    
-    def scrape_profile(self, channel_id: str) -> Dict:
+    def scrape_profile(self, channel_handle: str) -> Dict:
         """
-        Scrape YouTube channel information
-        
-        Args:
-            channel_id (str): YouTube channel ID or username
-            
-        Returns:
-            Dictionary with channel info
+        Scrape YouTube channel info without API key
         """
         try:
-            if self.api_key:
-                return self._scrape_channel_api(channel_id)
+            # Normalize handle
+            if not channel_handle.startswith('@'):
+                channel_handle = f"@{channel_handle}"
+                
+            url = f"{self.BASE_URL}/{channel_handle}/about"
+            headers = {'Accept-Language': 'en-US,en;q=0.9'}
+            response = requests.get(url, headers=headers, timeout=self.request_timeout)
             
-            # Fallback URL-based scraping
-            url = f"{self.BASE_URL}/{channel_id}"
-            response = self._make_request(url)
+            if response.status_code != 200:
+                return {'success': False, 'error': f'Failed to fetch channel (Status: {response.status_code})'}
             
-            if not response:
-                return {'success': False, 'error': 'Failed to access YouTube channel'}
+            html = response.text
+            import json
             
-            channel = {
+            # Find ytInitialData JSON
+            start_str = 'var ytInitialData ='
+            start_idx = html.find(start_str)
+            if start_idx == -1:
+                return {'success': False, 'error': 'Could not find channel data'}
+                
+            start_idx += len(start_str)
+            end_idx = html.find(';</script>', start_idx)
+            data_str = html[start_idx:end_idx].strip()
+            data = json.loads(data_str)
+            
+            # Extract channel info
+            header = data.get('header', {}).get('pageHeaderRenderer', {}).get('content', {}).get('pageHeaderViewModel', {})
+            metadata = data.get('metadata', {}).get('channelMetadataRenderer', {})
+            
+            # Get stats from metadata rows
+            rows = header.get('metadata', {}).get('contentMetadataViewModel', {}).get('metadataRows', [])
+            subscribers = "0"
+            videos_count = "0"
+            
+            if len(rows) > 1:
+                parts = rows[1].get('metadataParts', [])
+                if len(parts) > 0:
+                    subscribers = parts[0].get('text', {}).get('content', '0').split(' ')[0]
+                if len(parts) > 1:
+                    videos_count = parts[1].get('text', {}).get('content', '0').split(' ')[0]
+            
+            profile = {
                 'platform': 'youtube',
-                'channel_id': channel_id,
-                'url': url,
-                'note': 'Use YouTube Data API for full channel data',
+                'username': channel_handle,
+                'title': metadata.get('title', ''),
+                'description': metadata.get('description', ''),
+                'subscribers': subscribers,
+                'video_count': videos_count,
+                'profile_pic': header.get('image', {}).get('decoratedAvatarViewModel', {}).get('avatar', {}).get('avatarViewModel', {}).get('image', {}).get('sources', [{}])[0].get('url', ''),
+                'url': f"{self.BASE_URL}/{channel_handle}",
                 'scraped_at': datetime.utcnow().isoformat()
             }
             
-            return {'success': True, 'data': channel}
+            return {'success': True, 'data': profile}
             
         except Exception as e:
-            logger.error(f"YouTube channel scrape error: {str(e)}")
+            logger.error(f"YouTube profile scrape error: {str(e)}")
             return {'success': False, 'error': str(e)}
     
-    def _scrape_channel_api(self, channel_id: str) -> Dict:
-        """Scrape YouTube channel using API"""
+    def scrape_posts(self, channel_handle: str, limit: int = 10) -> Dict:
+        """
+        Scrape latest YouTube videos from a channel
+        """
         try:
-            url = "https://www.googleapis.com/youtube/v3/channels"
-            params = {
-                'part': 'statistics,snippet',
-                'forHandle': f"@{channel_id}",
-                'key': self.api_key
-            }
-            response = self._make_request(url, params=params)
+            if not channel_handle.startswith('@'):
+                channel_handle = f"@{channel_handle}"
+                
+            url = f"{self.BASE_URL}/{channel_handle}/videos"
+            headers = {'Accept-Language': 'en-US,en;q=0.9'}
+            response = requests.get(url, headers=headers, timeout=self.request_timeout)
             
-            if not response:
-                return {'success': False, 'error': 'Failed to fetch YouTube channel'}
+            if response.status_code != 200:
+                return {'success': False, 'error': 'Failed to fetch videos'}
+                
+            html = response.text
+            import json
             
-            data = response.json()
-            if data.get('items'):
-                item = data['items'][0]
-                channel = {
-                    'platform': 'youtube',
-                    'channel_id': item['id'],
-                    'title': item.get('snippet', {}).get('title', ''),
-                    'description': item.get('snippet', {}).get('description', ''),
-                    'subscribers': item.get('statistics', {}).get('subscriberCount', 'N/A'),
-                    'videos': item.get('statistics', {}).get('videoCount', 0),
-                    'views': item.get('statistics', {}).get('viewCount', 0),
-                    'url': f"{self.BASE_URL}/channel/{item['id']}",
+            start_str = 'var ytInitialData ='
+            start_idx = html.find(start_str)
+            if start_idx == -1:
+                return {'success': False, 'error': 'Could not find video data'}
+                
+            start_idx += len(start_str)
+            end_idx = html.find(';</script>', start_idx)
+            data_str = html[start_idx:end_idx].strip()
+            data = json.loads(data_str)
+            
+            # Navigate to video list
+            tabs = data.get('contents', {}).get('twoColumnBrowseResultsRenderer', {}).get('tabs', [])
+            videos_tab = next((t for t in tabs if t.get('tabRenderer', {}).get('title') == 'Videos'), None)
+            
+            if not videos_tab:
+                return {'success': False, 'error': 'Videos tab not found'}
+                
+            items = videos_tab['tabRenderer']['content']['richGridRenderer']['contents']
+            
+            posts = []
+            for item in items[:limit]:
+                video = item.get('richItemRenderer', {}).get('content', {}).get('videoRenderer')
+                if not video:
+                    continue
+                    
+                posts.append({
+                    'post_id': video.get('videoId'),
+                    'title': video.get('title', {}).get('runs', [{}])[0].get('text', ''),
+                    'views': video.get('viewCountText', {}).get('simpleText', '0 views'),
+                    'published': video.get('publishedTimeText', {}).get('simpleText', ''),
+                    'thumbnail': video.get('thumbnail', {}).get('thumbnails', [{}])[-1].get('url', ''),
+                    'url': f"https://www.youtube.com/watch?v={video.get('videoId')}",
                     'scraped_at': datetime.utcnow().isoformat()
-                }
-                return {'success': True, 'data': channel}
-            
-            return {'success': False, 'error': 'Channel not found'}
+                })
+                
+            return {'success': True, 'data': posts, 'count': len(posts)}
             
         except Exception as e:
-            logger.error(f"YouTube API scrape error: {str(e)}")
+            logger.error(f"YouTube videos scrape error: {str(e)}")
             return {'success': False, 'error': str(e)}
+
+
+class FacebookScraper(SocialMediaScraper):
+    """Facebook page scraper using OG metadata"""
     
-    def scrape_posts(self, channel_id: str, limit: int = 10) -> Dict:
-        """YouTube videos scraping (requires API key)"""
-        if not self.api_key:
-            return {
-                'success': False,
-                'error': 'YouTube API key required for video scraping'
+    BASE_URL = "https://www.facebook.com"
+    
+    def scrape_profile(self, page_name: str) -> Dict:
+        """
+        Scrape Facebook page info using metadata
+        """
+        try:
+            url = f"{self.BASE_URL}/{page_name}"
+            headers = {'Accept-Language': 'en-US,en;q=0.9'}
+            response = requests.get(url, headers=headers, timeout=self.request_timeout)
+            
+            if response.status_code != 200:
+                return {'success': False, 'error': f'Failed to fetch Facebook page (Status: {response.status_code})'}
+            
+            html = response.text
+            import re
+            
+            # Extract info from og:description
+            # Example: "NASA. 28,652,229 likes · 229,341 talking about this."
+            desc_match = re.search(r'<meta property="og:description" content="([^"]+)"', html)
+            if not desc_match:
+                return {'success': False, 'error': 'Could not find page metadata'}
+            
+            desc = desc_match.group(1)
+            
+            # Extract likes (simple regex for numbers before 'likes')
+            likes = re.search(r'([\d,]+)\s+likes', desc)
+            likes_count = likes.group(1) if likes else "0"
+            
+            # Extract followers if present
+            followers = re.search(r'([\d,]+)\s+followers', desc)
+            followers_count = followers.group(1) if followers else likes_count # Often same on FB
+            
+            # Extract name and image
+            title_match = re.search(r'<meta property="og:title" content="([^"]+)"', html)
+            title = title_match.group(1) if title_match else page_name
+            
+            pic_match = re.search(r'<meta property="og:image" content="([^"]+)"', html)
+            profile_pic = pic_match.group(1) if pic_match else ''
+            
+            profile = {
+                'platform': 'facebook',
+                'username': page_name,
+                'title': title,
+                'likes': likes_count,
+                'followers': followers_count,
+                'profile_pic': profile_pic,
+                'url': url,
+                'scraped_at': datetime.utcnow().isoformat()
             }
-        
-        return {'success': False, 'error': 'Video scraping not yet implemented'}
+            
+            return {'success': True, 'data': profile}
+            
+        except Exception as e:
+            logger.error(f"Facebook profile scrape error: {str(e)}")
+            return {'success': False, 'error': str(e)}
+
+    def scrape_posts(self, page_name: str, limit: int = 10) -> Dict:
+        return {'success': False, 'error': 'Facebook posts require authentication to scrape.'}
 
 
 class SocialMediaScraperFactory:
@@ -522,10 +359,8 @@ class SocialMediaScraperFactory:
     
     scrapers = {
         SocialMediaPlatform.INSTAGRAM: InstagramScraper,
-        SocialMediaPlatform.TWITTER: TwitterScraper,
-        SocialMediaPlatform.LINKEDIN: LinkedInScraper,
-        SocialMediaPlatform.TIKTOK: TikTokScraper,
         SocialMediaPlatform.YOUTUBE: YouTubeScraper,
+        SocialMediaPlatform.FACEBOOK: FacebookScraper,
     }
     
     @classmethod

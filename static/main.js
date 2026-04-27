@@ -13,6 +13,7 @@ const DOWNLOAD_ENDPOINT = '/download';
 
 let currentScrapedData = [];
 let currentScrapedHeaders = [];
+let discoveredPages = [];
 
 // ================================================
 // Initialization
@@ -28,6 +29,8 @@ function initializeApp() {
     const scraperForm = document.getElementById('scraperForm');
     const clearResultsBtn = document.getElementById('clearResultsBtn');
     const downloadCsvBtn = document.getElementById('downloadCsvBtn');
+    const autoDiscoverCheck = document.getElementById('autoDiscoverCheck');
+    const discoverPagesBtn = document.getElementById('discoverPagesBtn');
     
     // Attach event listeners
     if (scraperForm) {
@@ -40,6 +43,15 @@ function initializeApp() {
     
     if (downloadCsvBtn) {
         downloadCsvBtn.addEventListener('click', downloadAsCSV);
+    }
+    
+    // Auto-discovery listeners
+    if (autoDiscoverCheck) {
+        autoDiscoverCheck.addEventListener('change', handleAutoDiscoverToggle);
+    }
+    
+    if (discoverPagesBtn) {
+        discoverPagesBtn.addEventListener('click', handleDiscoverPages);
     }
     
     console.log('Application initialized successfully');
@@ -537,4 +549,232 @@ document.addEventListener('visibilitychange', () => {
     } else {
         console.log('Page visible');
     }
+});
+
+// ================================================
+// Auto-Discovery Functions
+// ================================================
+
+/**
+ * Handle auto-discover toggle
+ */
+function handleAutoDiscoverToggle(event) {
+    const isEnabled = event.target.checked;
+    const discoverPagesBtn = document.getElementById('discoverPagesBtn');
+    const pagesInputGroup = document.getElementById('pagesInputGroup');
+    const discoveredPagesSection = document.getElementById('discoveredPagesSection');
+    
+    if (isEnabled) {
+        // Show discover button, hide manual pages input
+        discoverPagesBtn.style.display = 'inline-block';
+        pagesInputGroup.style.display = 'none';
+        
+        // Auto-discover pages when enabled
+        handleDiscoverPages();
+    } else {
+        // Hide discover button and discovered pages, show manual input
+        discoverPagesBtn.style.display = 'none';
+        discoveredPagesSection.style.display = 'none';
+        pagesInputGroup.style.display = 'block';
+        
+        // Clear discovered pages
+        discoveredPages = [];
+    }
+}
+
+/**
+ * Handle discover pages button click
+ */
+async function handleDiscoverPages() {
+    const urlInput = document.getElementById('urlInput').value.trim();
+    
+    if (!validateInputs(urlInput)) {
+        return;
+    }
+    
+    clearAlerts();
+    showDiscoveryLoading(true);
+    
+    try {
+        console.log('Discovering pages for:', urlInput);
+        
+        // Call discovery endpoint
+        const response = await fetch('/discover-pages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ url: urlInput })
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Failed to discover pages');
+        }
+        
+        discoveredPages = result.pages || [];
+        console.log('Discovered pages:', discoveredPages);
+        
+        displayDiscoveredPages(discoveredPages);
+        showAlert(`Discovered ${discoveredPages.length} pages`, 'success');
+        
+    } catch (error) {
+        console.error('Discovery error:', error);
+        showAlert(error.message || 'Failed to discover pages', 'danger');
+    } finally {
+        showDiscoveryLoading(false);
+    }
+}
+
+/**
+ * Display discovered pages
+ * @param {Array} pages - Discovered pages
+ */
+function displayDiscoveredPages(pages) {
+    const discoveredPagesSection = document.getElementById('discoveredPagesSection');
+    const pagesList = document.getElementById('pagesList');
+    
+    pagesList.innerHTML = '';
+    
+    if (pages.length === 0) {
+        pagesList.innerHTML = '<p style="color: #7f8c8d;">No pages discovered</p>';
+        discoveredPagesSection.style.display = 'block';
+        return;
+    }
+    
+    // Auto-select first 5 pages
+    pages.forEach((page, index) => {
+        const pageItem = document.createElement('div');
+        pageItem.className = 'page-item';
+        
+        // Auto-check first 5
+        const isChecked = index < 5;
+        
+        pageItem.innerHTML = `
+            <input 
+                type="checkbox" 
+                class="page-checkbox" 
+                value="${index}"
+                ${isChecked ? 'checked' : ''}
+            >
+            <label class="page-item-label">
+                <strong>${page.title || `Page ${index + 1}`}</strong>
+                <small>${page.url}</small>
+            </label>
+        `;
+        
+        if (isChecked) {
+            pageItem.classList.add('selected');
+        }
+        
+        // Add change listener
+        const checkbox = pageItem.querySelector('input[type="checkbox"]');
+        checkbox.addEventListener('change', function() {
+            if (this.checked) {
+                pageItem.classList.add('selected');
+            } else {
+                pageItem.classList.remove('selected');
+            }
+        });
+        
+        pagesList.appendChild(pageItem);
+    });
+    
+    discoveredPagesSection.style.display = 'block';
+}
+
+/**
+ * Show/hide discovery loading indicator
+ * @param {boolean} show - Whether to show
+ */
+function showDiscoveryLoading(show) {
+    const discoveryLoadingIndicator = document.getElementById('discoveryLoadingIndicator');
+    if (discoveryLoadingIndicator) {
+        discoveryLoadingIndicator.style.display = show ? 'flex' : 'none';
+    }
+}
+
+/**
+ * Get selected pages for scraping
+ * @returns {Array} - Selected page URLs
+ */
+function getSelectedPages() {
+    const checkboxes = document.querySelectorAll('.page-checkbox:checked');
+    const selectedPages = [];
+    
+    checkboxes.forEach(checkbox => {
+        const index = parseInt(checkbox.value);
+        if (discoveredPages[index]) {
+            selectedPages.push(discoveredPages[index].url);
+        }
+    });
+    
+    return selectedPages;
+}
+
+/**
+ * Override form submission to handle discovered pages
+ */
+document.addEventListener('DOMContentLoaded', function() {
+    const scraperForm = document.getElementById('scraperForm');
+    const originalFormHandler = scraperForm.onsubmit;
+    
+    scraperForm.addEventListener('submit', async function(event) {
+        const autoDiscoverCheck = document.getElementById('autoDiscoverCheck');
+        
+        if (autoDiscoverCheck && autoDiscoverCheck.checked) {
+            event.preventDefault();
+            
+            const selectedPages = getSelectedPages();
+            if (selectedPages.length === 0) {
+                showAlert('Please select at least one page to scrape', 'warning');
+                return;
+            }
+            
+            console.log('Scraping selected pages:', selectedPages);
+            
+            clearAlerts();
+            showLoadingIndicator();
+            
+            try {
+                // Scrape multiple pages
+                const urlInput = document.getElementById('urlInput').value.trim();
+                
+                const requestData = {
+                    url: urlInput,
+                    pages: selectedPages.length,
+                    discover: true,
+                    selected_pages: selectedPages
+                };
+                
+                const response = await fetch(SCRAPE_ENDPOINT, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestData)
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.message || 'Scraping failed');
+                }
+                
+                if (result.success) {
+                    handleScrapingSuccess(result);
+                } else {
+                    showAlert(result.message || 'Scraping failed', 'danger');
+                }
+                
+            } catch (error) {
+                console.error('Scraping error:', error);
+                showAlert(error.message || 'An error occurred during scraping', 'danger');
+            } finally {
+                hideLoadingIndicator();
+                updateSubmitButtonState();
+            }
+        }
+    });
 });

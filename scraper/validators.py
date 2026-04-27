@@ -287,12 +287,26 @@ def validate_scrape_request(data: dict) -> dict:
         except (ValidationError, ValueError) as e:
             raise ValidationError(f"Pages validation failed: {str(e)}")
     
+    # Validate selected_pages (optional)
+    selected_pages = data.get('selected_pages', [])
+    if selected_pages:
+        if not isinstance(selected_pages, list):
+            raise ValidationError("selected_pages must be a list of URLs")
+        
+        # Validate each URL in the list
+        for p_url in selected_pages:
+            try:
+                validate_url(p_url)
+            except ValidationError as e:
+                raise ValidationError(f"Invalid URL in selected_pages: {str(e)}")
+    
     # Return cleaned data
     return {
         'url': url,
         'selector': selector if selector else None,  # None if not provided
         'pages': max(1, int(pages)) if pages else 1,
-        'include_attributes': data.get('include_attributes', False)
+        'include_attributes': data.get('include_attributes', False),
+        'selected_pages': selected_pages
     }
 
 
